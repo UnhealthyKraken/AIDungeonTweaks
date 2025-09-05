@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "AIDungeon Metin Biçimlendirici" },
+  "extensionShortName": { "message": "AIDungeon Biçimlendirici" },
+  "extensionDescription": { "message": "AIDungeon metnini okunabilirlik ve daldırmayı artırmak için biçimlendirir" },
+  "actionTitle": { "message": "AIDungeon Biçimlendirici Ayarları" },
+  "tabActions": { "message": "Eylemler" },
+  "tabTextFormatting": { "message": "Metin biçimlendirme" },
+  "tabMisc": { "message": "Çeşitli" },
+  "groupActions": { "message": "Eylemler:" },
+  "groupDo": { "message": "Yap:" },
+  "groupSay": { "message": "Söyle:" },
+  "resetActions": { "message": "↺ Eylemleri sıfırla" },
+  "groupTextFormatting": { "message": "Metin biçimlendirme:" },
+  "groupAllCaps": { "message": "BÜYÜK HARF efektleri" },
+  "groupFont": { "message": "Yazı tipi" },
+  "groupMonologue": { "message": "İç monolog:" },
+  "groupKeywords": { "message": "Anahtar kelimeler" },
+  "groupMainText": { "message": "Ana metin:" },
+  "groupSpeech": { "message": "Konuşma" },
+  "resetTextFormatting": { "message": "↺ Biçimlendirmeyi sıfırla" },
+  "groupMisc": { "message": "Çeşitli:" },
+  "groupBackground": { "message": "Arka plan" },
+  "groupSync": { "message": "Senkronizasyon" },
+  "groupDebug": { "message": "Hata ayıklama" },
+  "labelResetAll": { "message": "Tüm ayarları sıfırla" },
+  "buttonResetAll": { "message": "↺ Hepsini sıfırla" }
+  ,"optDefault": { "message": "Varsayılan" }
+  ,"optCustom": { "message": "Özel…" }
+  ,"effNone": { "message": "Yok" }
+  ,"effFlash": { "message": "Flaş" }
+  ,"effStrobe": { "message": "Stroboskop" }
+  ,"effRainbow": { "message": "Gökkuşağı" }
+  ,"effWave": { "message": "Dalga" }
+  ,"effBreathe": { "message": "Nefes" }
+  ,"optWeightDefault": { "message": "Varsayılan" }
+  ,"optWeightRegular": { "message": "Normal" }
+  ,"optWeightMedium": { "message": "Orta" }
+  ,"optWeightBold": { "message": "Kalın" }
+  ,"optAlignDefault": { "message": "Varsayılan" }
+  ,"optAlignLeft": { "message": "Sol" }
+  ,"optAlignJustify": { "message": "İki yana yasla" }
+  ,"optBGTypeSolid": { "message": "Düz renk" }
+  ,"optBGTypeGradient": { "message": "Doğrusal gradyan" }
+  ,"groupLanguage": { "message": "Dil" }
+  ,"labelLanguage": { "message": "Dil geçersiz kılma" }
+  ,"langAuto": { "message": "Otomatik (tarayıcı)" }
+  ,"labelBold": { "message": "Kalın:" }
+  ,"labelColor": { "message": "Renk:" }
+  ,"labelEffect": { "message": "Efekt:" }
+  ,"labelFontFamily": { "message": "Yazı tipi ailesi" }
+  ,"labelFontSize": { "message": "Yazı tipi boyutu" }
+  ,"labelFontWeight": { "message": "Yazı tipi kalınlığı" }
+  ,"labelLineHeight": { "message": "Satır yüksekliği" }
+  ,"labelLetterSpacing": { "message": "Harf aralığı" }
+  ,"labelTextAlign": { "message": "Metin hizalama" }
+  ,"labelAddKeyword": { "message": "Anahtar kelime ekle" }
+  ,"buttonAdd": { "message": "＋ Ekle" }
+  ,"labelBgType": { "message": "Arka plan türü" }
+  ,"labelBgColor": { "message": "Düz renk" }
+  ,"labelBgGrad": { "message": "Gradyan (CSS)" }
+  ,"labelSync": { "message": "Ayarları cihazlar arasında senkronize et" }
+  ,"titleReset": { "message": "Sıfırla" }
+  ,"titleResetActions": { "message": "Eylemler bölümünü sıfırla" }
+  ,"titleResetTextFormatting": { "message": "Metin biçimlendirme bölümünü sıfırla" }
+  ,"titleResetFont": { "message": "Yazı tipi bölümünü sıfırla" }
+  ,"titleResetAll": { "message": "Tüm ayarları sıfırla" }
+}
+
+

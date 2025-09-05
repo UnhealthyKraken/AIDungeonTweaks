@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "Pemformat Teks AIDungeon" },
+  "extensionShortName": { "message": "Pemformat AIDungeon" },
+  "extensionDescription": { "message": "Memformat teks AIDungeon untuk meningkatkan keterbacaan dan imersi" },
+  "actionTitle": { "message": "Pengaturan Pemformat AIDungeon" },
+  "tabActions": { "message": "Aksi" },
+  "tabTextFormatting": { "message": "Pemformatan teks" },
+  "tabMisc": { "message": "Lainnya" },
+  "groupActions": { "message": "Aksi:" },
+  "groupDo": { "message": "Lakukan:" },
+  "groupSay": { "message": "Katakan:" },
+  "resetActions": { "message": "↺ Atur Ulang Aksi" },
+  "groupTextFormatting": { "message": "Pemformatan teks:" },
+  "groupAllCaps": { "message": "Efek HURUF BESAR" },
+  "groupFont": { "message": "Font" },
+  "groupMonologue": { "message": "Monolog internal:" },
+  "groupKeywords": { "message": "Kata kunci" },
+  "groupMainText": { "message": "Teks utama:" },
+  "groupSpeech": { "message": "Ucapan" },
+  "resetTextFormatting": { "message": "↺ Atur Ulang Pemformatan" },
+  "groupMisc": { "message": "Lainnya:" },
+  "groupBackground": { "message": "Latar belakang" },
+  "groupSync": { "message": "Sinkronisasi" },
+  "groupDebug": { "message": "Debug" },
+  "labelResetAll": { "message": "Atur ulang semua pengaturan" },
+  "buttonResetAll": { "message": "↺ Atur Ulang Semua" }
+  ,"optDefault": { "message": "Default" }
+  ,"optCustom": { "message": "Kustom…" }
+  ,"effNone": { "message": "Tidak ada" }
+  ,"effFlash": { "message": "Kilat" }
+  ,"effStrobe": { "message": "Strobe" }
+  ,"effRainbow": { "message": "Pelangi" }
+  ,"effWave": { "message": "Gelombang" }
+  ,"effBreathe": { "message": "Bernapas" }
+  ,"optWeightDefault": { "message": "Default" }
+  ,"optWeightRegular": { "message": "Reguler" }
+  ,"optWeightMedium": { "message": "Sedang" }
+  ,"optWeightBold": { "message": "Tebal" }
+  ,"optAlignDefault": { "message": "Default" }
+  ,"optAlignLeft": { "message": "Kiri" }
+  ,"optAlignJustify": { "message": "Rata kiri‑kanan" }
+  ,"optBGTypeSolid": { "message": "Warna solid" }
+  ,"optBGTypeGradient": { "message": "Gradien linear" }
+  ,"groupLanguage": { "message": "Bahasa" }
+  ,"labelLanguage": { "message": "Penggantian bahasa" }
+  ,"langAuto": { "message": "Otomatis (Peramban)" }
+  ,"labelBold": { "message": "Tebal:" }
+  ,"labelColor": { "message": "Warna:" }
+  ,"labelEffect": { "message": "Efek:" }
+  ,"labelFontFamily": { "message": "Keluarga font" }
+  ,"labelFontSize": { "message": "Ukuran font" }
+  ,"labelFontWeight": { "message": "Ketebalan font" }
+  ,"labelLineHeight": { "message": "Tinggi baris" }
+  ,"labelLetterSpacing": { "message": "Jarak huruf" }
+  ,"labelTextAlign": { "message": "Perataan teks" }
+  ,"labelAddKeyword": { "message": "Tambah kata kunci" }
+  ,"buttonAdd": { "message": "＋ Tambah" }
+  ,"labelBgType": { "message": "Jenis latar" }
+  ,"labelBgColor": { "message": "Warna solid" }
+  ,"labelBgGrad": { "message": "Gradien (CSS)" }
+  ,"labelSync": { "message": "Sinkronkan setelan antar perangkat" }
+  ,"titleReset": { "message": "Atur ulang" }
+  ,"titleResetActions": { "message": "Atur ulang bagian Aksi" }
+  ,"titleResetTextFormatting": { "message": "Atur ulang bagian Pemformatan" }
+  ,"titleResetFont": { "message": "Atur ulang bagian Font" }
+  ,"titleResetAll": { "message": "Atur ulang semua setelan" }
+}
+
+

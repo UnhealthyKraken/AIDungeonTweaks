@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "AI Dungeon Tweaks" },
+  "extensionShortName": { "message": "AI Dungeon Tweaks" },
+  "extensionDescription": { "message": "Tweaks and formatting for AI Dungeon to enhance readability and immersion" },
+  "actionTitle": { "message": "AI Dungeon Tweaks Settings" },
+  "tabActions": { "message": "Actions" },
+  "tabTextFormatting": { "message": "Text Formatting" },
+  "tabMisc": { "message": "Miscellaneous" },
+  "groupActions": { "message": "Actions:" },
+  "groupDo": { "message": "Do:" },
+  "groupSay": { "message": "Say:" },
+  "resetActions": { "message": "↺ Reset Actions" },
+  "groupTextFormatting": { "message": "Text Formatting:" },
+  "groupAllCaps": { "message": "All Caps Effects" },
+  "groupFont": { "message": "Font" },
+  "groupMonologue": { "message": "Internal Monologue:" },
+  "groupKeywords": { "message": "Keywords" },
+  "groupMainText": { "message": "Main Text:" },
+  "groupSpeech": { "message": "Speech" },
+  "resetTextFormatting": { "message": "↺ Reset Text Formatting" },
+  "groupMisc": { "message": "Miscellaneous:" },
+  "groupBackground": { "message": "Background" },
+  "groupSync": { "message": "Sync" },
+  "groupDebug": { "message": "Debug" },
+  "labelResetAll": { "message": "Reset all settings" },
+  "buttonResetAll": { "message": "↺ Reset All" }
+  ,"optDefault": { "message": "Default" }
+  ,"optCustom": { "message": "Custom…" }
+  ,"effNone": { "message": "None" }
+  ,"effFlash": { "message": "Flash" }
+  ,"effStrobe": { "message": "Strobe" }
+  ,"effRainbow": { "message": "Rainbow" }
+  ,"effWave": { "message": "Wave" }
+  ,"effBreathe": { "message": "Breathe" }
+  ,"optWeightDefault": { "message": "Default" }
+  ,"optWeightRegular": { "message": "Regular" }
+  ,"optWeightMedium": { "message": "Medium" }
+  ,"optWeightBold": { "message": "Bold" }
+  ,"optAlignDefault": { "message": "Default" }
+  ,"optAlignLeft": { "message": "Left" }
+  ,"optAlignJustify": { "message": "Justify" }
+  ,"optBGTypeSolid": { "message": "Solid color" }
+  ,"optBGTypeGradient": { "message": "Linear gradient" }
+  ,"groupLanguage": { "message": "Language" }
+  ,"labelLanguage": { "message": "Language override" }
+  ,"langAuto": { "message": "Auto (Browser)" }
+  ,"labelBold": { "message": "Bold:" }
+  ,"labelColor": { "message": "Color:" }
+  ,"labelEffect": { "message": "Effect:" }
+  ,"labelFontFamily": { "message": "Font Family" }
+  ,"labelFontSize": { "message": "Font Size" }
+  ,"labelFontWeight": { "message": "Font Weight" }
+  ,"labelLineHeight": { "message": "Line Height" }
+  ,"labelLetterSpacing": { "message": "Letter Spacing" }
+  ,"labelTextAlign": { "message": "Text Alignment" }
+  ,"labelAddKeyword": { "message": "Add keyword" }
+  ,"buttonAdd": { "message": "＋ Add" }
+  ,"labelBgType": { "message": "Background Type" }
+  ,"labelBgColor": { "message": "Solid color" }
+  ,"labelBgGrad": { "message": "Gradient (CSS)" }
+  ,"labelSync": { "message": "Sync settings across devices" }
+  ,"titleReset": { "message": "Reset" }
+  ,"titleResetActions": { "message": "Reset Actions Section" }
+  ,"titleResetTextFormatting": { "message": "Reset Text Formatting Section" }
+  ,"titleResetFont": { "message": "Reset Font Section" }
+  ,"titleResetAll": { "message": "Reset All Settings" }
+}
+
+

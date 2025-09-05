@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "Formateur de texte AIDungeon" },
+  "extensionShortName": { "message": "Formateur AIDungeon" },
+  "extensionDescription": { "message": "Formate le texte d'AIDungeon pour améliorer la lisibilité et l'immersion" },
+  "actionTitle": { "message": "Paramètres du formateur AIDungeon" },
+  "tabActions": { "message": "Actions" },
+  "tabTextFormatting": { "message": "Mise en forme" },
+  "tabMisc": { "message": "Divers" },
+  "groupActions": { "message": "Actions :" },
+  "groupDo": { "message": "Faire :" },
+  "groupSay": { "message": "Dire :" },
+  "resetActions": { "message": "↺ Réinitialiser Actions" },
+  "groupTextFormatting": { "message": "Mise en forme :" },
+  "groupAllCaps": { "message": "Effets pour MAJUSCULES" },
+  "groupFont": { "message": "Police" },
+  "groupMonologue": { "message": "Monologue interne :" },
+  "groupKeywords": { "message": "Mots-clés" },
+  "groupMainText": { "message": "Texte principal :" },
+  "groupSpeech": { "message": "Dialogue" },
+  "resetTextFormatting": { "message": "↺ Réinitialiser Mise en forme" },
+  "groupMisc": { "message": "Divers :" },
+  "groupBackground": { "message": "Arrière-plan" },
+  "groupSync": { "message": "Sync" },
+  "groupDebug": { "message": "Débogage" },
+  "labelResetAll": { "message": "Réinitialiser tous les paramètres" },
+  "buttonResetAll": { "message": "↺ Tout réinitialiser" }
+  ,"optDefault": { "message": "Par défaut" }
+  ,"optCustom": { "message": "Personnalisé…" }
+  ,"effNone": { "message": "Aucun" }
+  ,"effFlash": { "message": "Flash" }
+  ,"effStrobe": { "message": "Stroboscope" }
+  ,"effRainbow": { "message": "Arc‑en‑ciel" }
+  ,"effWave": { "message": "Vague" }
+  ,"effBreathe": { "message": "Respiration" }
+  ,"optWeightDefault": { "message": "Par défaut" }
+  ,"optWeightRegular": { "message": "Normal" }
+  ,"optWeightMedium": { "message": "Moyen" }
+  ,"optWeightBold": { "message": "Gras" }
+  ,"optAlignDefault": { "message": "Par défaut" }
+  ,"optAlignLeft": { "message": "Gauche" }
+  ,"optAlignJustify": { "message": "Justifié" }
+  ,"optBGTypeSolid": { "message": "Couleur unie" }
+  ,"optBGTypeGradient": { "message": "Dégradé linéaire" }
+  ,"groupLanguage": { "message": "Langue" }
+  ,"labelLanguage": { "message": "Forcer la langue" }
+  ,"langAuto": { "message": "Auto (navigateur)" }
+  ,"labelBold": { "message": "Gras :" }
+  ,"labelColor": { "message": "Couleur :" }
+  ,"labelEffect": { "message": "Effet :" }
+  ,"labelFontFamily": { "message": "Police" }
+  ,"labelFontSize": { "message": "Taille de police" }
+  ,"labelFontWeight": { "message": "Graisse" }
+  ,"labelLineHeight": { "message": "Interligne" }
+  ,"labelLetterSpacing": { "message": "Espacement des lettres" }
+  ,"labelTextAlign": { "message": "Alignement du texte" }
+  ,"labelAddKeyword": { "message": "Ajouter un mot‑clé" }
+  ,"buttonAdd": { "message": "＋ Ajouter" }
+  ,"labelBgType": { "message": "Type d’arrière‑plan" }
+  ,"labelBgColor": { "message": "Couleur unie" }
+  ,"labelBgGrad": { "message": "Dégradé (CSS)" }
+  ,"labelSync": { "message": "Synchroniser les paramètres entre appareils" }
+  ,"titleReset": { "message": "Réinitialiser" }
+  ,"titleResetActions": { "message": "Réinitialiser la section Actions" }
+  ,"titleResetTextFormatting": { "message": "Réinitialiser la section Mise en forme" }
+  ,"titleResetFont": { "message": "Réinitialiser la section Police" }
+  ,"titleResetAll": { "message": "Réinitialiser tous les paramètres" }
+}
+
+

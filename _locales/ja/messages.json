@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "AIDungeon テキストフォーマッタ" },
+  "extensionShortName": { "message": "AIDungeon フォーマッタ" },
+  "extensionDescription": { "message": "AIDungeon のテキストを整形して可読性と没入感を向上させます" },
+  "actionTitle": { "message": "AIDungeon フォーマッタ設定" },
+  "tabActions": { "message": "アクション" },
+  "tabTextFormatting": { "message": "テキスト整形" },
+  "tabMisc": { "message": "その他" },
+  "groupActions": { "message": "アクション:" },
+  "groupDo": { "message": "実行:" },
+  "groupSay": { "message": "発言:" },
+  "resetActions": { "message": "↺ アクションをリセット" },
+  "groupTextFormatting": { "message": "テキスト整形:" },
+  "groupAllCaps": { "message": "全大文字の効果" },
+  "groupFont": { "message": "フォント" },
+  "groupMonologue": { "message": "内心の独白:" },
+  "groupKeywords": { "message": "キーワード" },
+  "groupMainText": { "message": "本文:" },
+  "groupSpeech": { "message": "セリフ" },
+  "resetTextFormatting": { "message": "↺ 整形をリセット" },
+  "groupMisc": { "message": "その他:" },
+  "groupBackground": { "message": "背景" },
+  "groupSync": { "message": "同期" },
+  "groupDebug": { "message": "デバッグ" },
+  "labelResetAll": { "message": "すべての設定をリセット" },
+  "buttonResetAll": { "message": "↺ すべてリセット" }
+  ,"optDefault": { "message": "デフォルト" }
+  ,"optCustom": { "message": "カスタム…" }
+  ,"effNone": { "message": "なし" }
+  ,"effFlash": { "message": "フラッシュ" }
+  ,"effStrobe": { "message": "ストロボ" }
+  ,"effRainbow": { "message": "レインボー" }
+  ,"effWave": { "message": "ウェーブ" }
+  ,"effBreathe": { "message": "ブリーズ" }
+  ,"optWeightDefault": { "message": "デフォルト" }
+  ,"optWeightRegular": { "message": "レギュラー" }
+  ,"optWeightMedium": { "message": "ミディアム" }
+  ,"optWeightBold": { "message": "ボールド" }
+  ,"optAlignDefault": { "message": "デフォルト" }
+  ,"optAlignLeft": { "message": "左" }
+  ,"optAlignJustify": { "message": "均等割付" }
+  ,"optBGTypeSolid": { "message": "単色" }
+  ,"optBGTypeGradient": { "message": "線形グラデーション" }
+  ,"groupLanguage": { "message": "言語" }
+  ,"labelLanguage": { "message": "言語の上書き" }
+  ,"langAuto": { "message": "自動（ブラウザー）" }
+  ,"labelBold": { "message": "太字:" }
+  ,"labelColor": { "message": "色:" }
+  ,"labelEffect": { "message": "効果:" }
+  ,"labelFontFamily": { "message": "フォントファミリー" }
+  ,"labelFontSize": { "message": "フォントサイズ" }
+  ,"labelFontWeight": { "message": "フォントの太さ" }
+  ,"labelLineHeight": { "message": "行の高さ" }
+  ,"labelLetterSpacing": { "message": "文字間隔" }
+  ,"labelTextAlign": { "message": "テキストの配置" }
+  ,"labelAddKeyword": { "message": "キーワードを追加" }
+  ,"buttonAdd": { "message": "＋ 追加" }
+  ,"labelBgType": { "message": "背景タイプ" }
+  ,"labelBgColor": { "message": "単色" }
+  ,"labelBgGrad": { "message": "グラデーション（CSS）" }
+  ,"labelSync": { "message": "設定をデバイス間で同期" }
+  ,"titleReset": { "message": "リセット" }
+  ,"titleResetActions": { "message": "「アクション」セクションをリセット" }
+  ,"titleResetTextFormatting": { "message": "「テキスト整形」セクションをリセット" }
+  ,"titleResetFont": { "message": "「フォント」セクションをリセット" }
+  ,"titleResetAll": { "message": "すべての設定をリセット" }
+}
+
+

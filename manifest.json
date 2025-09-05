@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extensionName__",
+  "short_name": "__MSG_extensionShortName__",
+  "version": "1.1",
+  "default_locale": "en",
+  "description": "__MSG_extensionDescription__",
+  "author": "Kraken",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.aidungeon.io/*",
+    "*://*.aidungeon.com/*"
+  ],
+  
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.aidungeon.io/*",
+        "*://*.aidungeon.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "icons": {
+    "16": "icon48.png",
+    "48": "icon48.png",
+    "96": "icon96.png",
+    "128": "icon96.png"
+  },
+  
+  "action": {
+    "default_title": "__MSG_actionTitle__",
+    "default_icon": {
+      "16": "icon48.png",
+      "32": "icon48.png",
+      "48": "icon48.png",
+      "96": "icon96.png",
+      "128": "icon96.png"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aidungeon-formatter@kraken",
+      "strict_min_version": "109.0"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "popup.js", "styles.css", "logo.gif"],
+      "matches": ["*://*.aidungeon.io/*", "*://*.aidungeon.com/*"]
+    }
+  ]
+}

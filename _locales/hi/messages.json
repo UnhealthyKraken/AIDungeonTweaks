@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "AIDungeon टेक्स्ट फ़ॉर्मैटर" },
+  "extensionShortName": { "message": "AIDungeon फ़ॉर्मैटर" },
+  "extensionDescription": { "message": "AIDungeon पाठ को बेहतर पठनीयता और डूबाव के लिए स्वरूपित करता है" },
+  "actionTitle": { "message": "AIDungeon फ़ॉर्मैटर सेटिंग्स" },
+  "tabActions": { "message": "क्रियाएँ" },
+  "tabTextFormatting": { "message": "पाठ स्वरूपण" },
+  "tabMisc": { "message": "विविध" },
+  "groupActions": { "message": "क्रियाएँ:" },
+  "groupDo": { "message": "करें:" },
+  "groupSay": { "message": "कहें:" },
+  "resetActions": { "message": "↺ क्रियाएँ रीसेट करें" },
+  "groupTextFormatting": { "message": "पाठ स्वरूपण:" },
+  "groupAllCaps": { "message": "सभी बड़े अक्षरों के प्रभाव" },
+  "groupFont": { "message": "फ़ॉन्ट" },
+  "groupMonologue": { "message": "आंतरिक विचार:" },
+  "groupKeywords": { "message": "कुंजीशब्द" },
+  "groupMainText": { "message": "मुख्य पाठ:" },
+  "groupSpeech": { "message": "संवाद" },
+  "resetTextFormatting": { "message": "↺ पाठ स्वरूपण रीसेट करें" },
+  "groupMisc": { "message": "विविध:" },
+  "groupBackground": { "message": "पृष्ठभूमि" },
+  "groupSync": { "message": "सिंक" },
+  "groupDebug": { "message": "डीबग" },
+  "labelResetAll": { "message": "सभी सेटिंग्स रीसेट करें" },
+  "buttonResetAll": { "message": "↺ सब रीसेट करें" }
+  ,"optDefault": { "message": "डिफ़ॉल्ट" }
+  ,"optCustom": { "message": "कस्टम…" }
+  ,"effNone": { "message": "कोई नहीं" }
+  ,"effFlash": { "message": "फ्लैश" }
+  ,"effStrobe": { "message": "स्ट्रोब" }
+  ,"effRainbow": { "message": "इंद्रधनुष" }
+  ,"effWave": { "message": "लहर" }
+  ,"effBreathe": { "message": "श्वास" }
+  ,"optWeightDefault": { "message": "डिफ़ॉल्ट" }
+  ,"optWeightRegular": { "message": "रेगुलर" }
+  ,"optWeightMedium": { "message": "मध्यम" }
+  ,"optWeightBold": { "message": "बोल्ड" }
+  ,"optAlignDefault": { "message": "डिफ़ॉल्ट" }
+  ,"optAlignLeft": { "message": "बाएँ" }
+  ,"optAlignJustify": { "message": "समायोजित" }
+  ,"optBGTypeSolid": { "message": "सॉलिड रंग" }
+  ,"optBGTypeGradient": { "message": "लिनियर ग्रेडिएंट" }
+  ,"groupLanguage": { "message": "भाषा" }
+  ,"labelLanguage": { "message": "भाषा ओवरराइड" }
+  ,"langAuto": { "message": "स्वचालित (ब्राउज़र)" }
+  ,"labelBold": { "message": "बोल्ड:" }
+  ,"labelColor": { "message": "रंग:" }
+  ,"labelEffect": { "message": "इफेक्ट:" }
+  ,"labelFontFamily": { "message": "फ़ॉन्ट परिवार" }
+  ,"labelFontSize": { "message": "फ़ॉन्ट आकार" }
+  ,"labelFontWeight": { "message": "फ़ॉन्ट वज़न" }
+  ,"labelLineHeight": { "message": "लाइन हाइट" }
+  ,"labelLetterSpacing": { "message": "अक्षर अंतर" }
+  ,"labelTextAlign": { "message": "पाठ संरेखण" }
+  ,"labelAddKeyword": { "message": "कुंजीशब्द जोड़ें" }
+  ,"buttonAdd": { "message": "＋ जोड़ें" }
+  ,"labelBgType": { "message": "पृष्ठभूमि प्रकार" }
+  ,"labelBgColor": { "message": "सॉलिड रंग" }
+  ,"labelBgGrad": { "message": "ग्रेडिएंट (CSS)" }
+  ,"labelSync": { "message": "डिवाइसों में सेटिंग्स सिंक करें" }
+  ,"titleReset": { "message": "रीसेट" }
+  ,"titleResetActions": { "message": "क्रियाएँ अनुभाग रीसेट करें" }
+  ,"titleResetTextFormatting": { "message": "पाठ स्वरूपण अनुभाग रीसेट करें" }
+  ,"titleResetFont": { "message": "फ़ॉन्ट अनुभाग रीसेट करें" }
+  ,"titleResetAll": { "message": "सभी सेटिंग्स रीसेट करें" }
+}
+
+

@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "Форматер текста AIDungeon" },
+  "extensionShortName": { "message": "Форматер AIDungeon" },
+  "extensionDescription": { "message": "Форматирует текст AIDungeon для улучшения читаемости и погружения" },
+  "actionTitle": { "message": "Настройки форматера AIDungeon" },
+  "tabActions": { "message": "Действия" },
+  "tabTextFormatting": { "message": "Форматирование текста" },
+  "tabMisc": { "message": "Разное" },
+  "groupActions": { "message": "Действия:" },
+  "groupDo": { "message": "Сделать:" },
+  "groupSay": { "message": "Сказать:" },
+  "resetActions": { "message": "↺ Сбросить действия" },
+  "groupTextFormatting": { "message": "Форматирование текста:" },
+  "groupAllCaps": { "message": "Эффекты для ЗАГЛАВНЫХ" },
+  "groupFont": { "message": "Шрифт" },
+  "groupMonologue": { "message": "Внутренний монолог:" },
+  "groupKeywords": { "message": "Ключевые слова" },
+  "groupMainText": { "message": "Основной текст:" },
+  "groupSpeech": { "message": "Речь" },
+  "resetTextFormatting": { "message": "↺ Сбросить форматирование" },
+  "groupMisc": { "message": "Разное:" },
+  "groupBackground": { "message": "Фон" },
+  "groupSync": { "message": "Синхронизация" },
+  "groupDebug": { "message": "Отладка" },
+  "labelResetAll": { "message": "Сбросить все настройки" },
+  "buttonResetAll": { "message": "↺ Сбросить всё" }
+  ,"optDefault": { "message": "По умолчанию" }
+  ,"optCustom": { "message": "Пользовательский…" }
+  ,"effNone": { "message": "Нет" }
+  ,"effFlash": { "message": "Вспышка" }
+  ,"effStrobe": { "message": "Строб" }
+  ,"effRainbow": { "message": "Радуга" }
+  ,"effWave": { "message": "Волна" }
+  ,"effBreathe": { "message": "Дыхание" }
+  ,"optWeightDefault": { "message": "По умолчанию" }
+  ,"optWeightRegular": { "message": "Обычный" }
+  ,"optWeightMedium": { "message": "Средний" }
+  ,"optWeightBold": { "message": "Жирный" }
+  ,"optAlignDefault": { "message": "По умолчанию" }
+  ,"optAlignLeft": { "message": "Влево" }
+  ,"optAlignJustify": { "message": "По ширине" }
+  ,"optBGTypeSolid": { "message": "Сплошной цвет" }
+  ,"optBGTypeGradient": { "message": "Линейный градиент" }
+  ,"groupLanguage": { "message": "Язык" }
+  ,"labelLanguage": { "message": "Переопределение языка" }
+  ,"langAuto": { "message": "Авто (браузер)" }
+  ,"labelBold": { "message": "Жирный:" }
+  ,"labelColor": { "message": "Цвет:" }
+  ,"labelEffect": { "message": "Эффект:" }
+  ,"labelFontFamily": { "message": "Семейство шрифтов" }
+  ,"labelFontSize": { "message": "Размер шрифта" }
+  ,"labelFontWeight": { "message": "Начертание" }
+  ,"labelLineHeight": { "message": "Межстрочный интервал" }
+  ,"labelLetterSpacing": { "message": "Межбуквенный интервал" }
+  ,"labelTextAlign": { "message": "Выравнивание текста" }
+  ,"labelAddKeyword": { "message": "Добавить ключевое слово" }
+  ,"buttonAdd": { "message": "＋ Добавить" }
+  ,"labelBgType": { "message": "Тип фона" }
+  ,"labelBgColor": { "message": "Сплошной цвет" }
+  ,"labelBgGrad": { "message": "Градиент (CSS)" }
+  ,"labelSync": { "message": "Синхронизировать настройки между устройствами" }
+  ,"titleReset": { "message": "Сбросить" }
+  ,"titleResetActions": { "message": "Сбросить раздел Действия" }
+  ,"titleResetTextFormatting": { "message": "Сбросить раздел Форматирование" }
+  ,"titleResetFont": { "message": "Сбросить раздел Шрифт" }
+  ,"titleResetAll": { "message": "Сбросить все настройки" }
+}
+
+

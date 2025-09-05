@@ -1,0 +1,69 @@
+{
+  "extensionName": { "message": "AIDungeon 文本格式化器" },
+  "extensionShortName": { "message": "AIDungeon 格式化器" },
+  "extensionDescription": { "message": "格式化 AIDungeon 文本以提升可读性和沉浸感" },
+  "actionTitle": { "message": "AIDungeon 格式化器设置" },
+  "tabActions": { "message": "操作" },
+  "tabTextFormatting": { "message": "文本格式" },
+  "tabMisc": { "message": "杂项" },
+  "groupActions": { "message": "操作：" },
+  "groupDo": { "message": "执行：" },
+  "groupSay": { "message": "说：" },
+  "resetActions": { "message": "↺ 重置操作" },
+  "groupTextFormatting": { "message": "文本格式：" },
+  "groupAllCaps": { "message": "全大写效果" },
+  "groupFont": { "message": "字体" },
+  "groupMonologue": { "message": "内心独白：" },
+  "groupKeywords": { "message": "关键词" },
+  "groupMainText": { "message": "正文：" },
+  "groupSpeech": { "message": "对白" },
+  "resetTextFormatting": { "message": "↺ 重置文本格式" },
+  "groupMisc": { "message": "杂项：" },
+  "groupBackground": { "message": "背景" },
+  "groupSync": { "message": "同步" },
+  "groupDebug": { "message": "调试" },
+  "labelResetAll": { "message": "重置所有设置" },
+  "buttonResetAll": { "message": "↺ 全部重置" }
+  ,"optDefault": { "message": "默认" }
+  ,"optCustom": { "message": "自定义…" }
+  ,"effNone": { "message": "无" }
+  ,"effFlash": { "message": "闪烁" }
+  ,"effStrobe": { "message": "频闪" }
+  ,"effRainbow": { "message": "彩虹" }
+  ,"effWave": { "message": "波浪" }
+  ,"effBreathe": { "message": "呼吸" }
+  ,"optWeightDefault": { "message": "默认" }
+  ,"optWeightRegular": { "message": "常规" }
+  ,"optWeightMedium": { "message": "中等" }
+  ,"optWeightBold": { "message": "加粗" }
+  ,"optAlignDefault": { "message": "默认" }
+  ,"optAlignLeft": { "message": "左对齐" }
+  ,"optAlignJustify": { "message": "两端对齐" }
+  ,"optBGTypeSolid": { "message": "纯色" }
+  ,"optBGTypeGradient": { "message": "线性渐变" }
+  ,"groupLanguage": { "message": "语言" }
+  ,"labelLanguage": { "message": "语言覆盖" }
+  ,"langAuto": { "message": "自动（浏览器）" }
+  ,"labelBold": { "message": "加粗：" }
+  ,"labelColor": { "message": "颜色：" }
+  ,"labelEffect": { "message": "效果：" }
+  ,"labelFontFamily": { "message": "字体族" }
+  ,"labelFontSize": { "message": "字体大小" }
+  ,"labelFontWeight": { "message": "字体粗细" }
+  ,"labelLineHeight": { "message": "行高" }
+  ,"labelLetterSpacing": { "message": "字间距" }
+  ,"labelTextAlign": { "message": "文本对齐" }
+  ,"labelAddKeyword": { "message": "添加关键词" }
+  ,"buttonAdd": { "message": "＋ 添加" }
+  ,"labelBgType": { "message": "背景类型" }
+  ,"labelBgColor": { "message": "纯色" }
+  ,"labelBgGrad": { "message": "渐变（CSS）" }
+  ,"labelSync": { "message": "跨设备同步设置" }
+  ,"titleReset": { "message": "重置" }
+  ,"titleResetActions": { "message": "重置“操作”部分" }
+  ,"titleResetTextFormatting": { "message": "重置“文本格式”部分" }
+  ,"titleResetFont": { "message": "重置“字体”部分" }
+  ,"titleResetAll": { "message": "重置所有设置" }
+}
+
+
