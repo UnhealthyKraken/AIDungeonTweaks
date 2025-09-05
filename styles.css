@@ -42,6 +42,17 @@
   100% { background-position: -600% 50%; }
 }
 
+/* Respect user reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .ai-caps-flash,
+  .ai-caps-strobe,
+  .ai-caps-breathe,
+  .ai-caps-rainbow,
+  .ai-caps-wave {
+    animation: none !important;
+  }
+}
+
 /* Wave (vertical bob + subtle scale) */
 .ai-caps-wave {
   display: inline-block;

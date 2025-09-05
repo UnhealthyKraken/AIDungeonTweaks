@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "重置“文本格式”部分" }
   ,"titleResetFont": { "message": "重置“字体”部分" }
   ,"titleResetAll": { "message": "重置所有设置" }
+  ,"groupProfiles": { "message": "配置文件" }
+  ,"labelProfile": { "message": "配置文件" }
+  ,"buttonSaveProfile": { "message": "另存为新配置" }
+  ,"buttonDeleteProfile": { "message": "删除配置文件" }
+  ,"profileDefault": { "message": "默认" }
+  ,"promptProfileName": { "message": "配置名称：" }
+  ,"confirmDeleteProfile": { "message": "删除此配置文件？" }
+  ,"groupExportImport": { "message": "导出 / 导入" }
+  ,"labelExportImport": { "message": "备份或恢复设置" }
+  ,"buttonExport": { "message": "导出" }
+  ,"buttonImport": { "message": "导入" }
+  ,"colorBlack": { "message": "黑色" }
+  ,"colorBlue": { "message": "蓝色" }
+  ,"colorGreen": { "message": "绿色" }
+  ,"colorLightBlue": { "message": "浅蓝" }
+  ,"colorPink": { "message": "粉色" }
+  ,"colorRed": { "message": "红色" }
+  ,"colorTeal": { "message": "青色" }
+  ,"colorYellow": { "message": "黄色" }
+  ,"colorWhite": { "message": "白色" }
+  ,"buttonRenameProfile": { "message": "重命名" }
+  ,"buttonDuplicateProfile": { "message": "复制" }
+  ,"labelBinding": { "message": "绑定" }
+  ,"buttonBindToStory": { "message": "绑定到此故事" }
+  ,"buttonUnbindFromStory": { "message": "取消绑定" }
+  ,"promptRenameProfile": { "message": "重命名配置：" }
+  ,"promptDuplicateProfile": { "message": "副本名称：" }
 }
 
 

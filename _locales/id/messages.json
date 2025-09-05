@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Atur ulang bagian Pemformatan" }
   ,"titleResetFont": { "message": "Atur ulang bagian Font" }
   ,"titleResetAll": { "message": "Atur ulang semua setelan" }
+  ,"groupProfiles": { "message": "Profil" }
+  ,"labelProfile": { "message": "Profil" }
+  ,"buttonSaveProfile": { "message": "Simpan sebagai baru" }
+  ,"buttonDeleteProfile": { "message": "Hapus profil" }
+  ,"profileDefault": { "message": "Default" }
+  ,"promptProfileName": { "message": "Nama profil:" }
+  ,"confirmDeleteProfile": { "message": "Hapus profil ini?" }
+  ,"groupExportImport": { "message": "Ekspor / Impor" }
+  ,"labelExportImport": { "message": "Cadangkan atau pulihkan setelan" }
+  ,"buttonExport": { "message": "Ekspor" }
+  ,"buttonImport": { "message": "Impor" }
+  ,"colorBlack": { "message": "Hitam" }
+  ,"colorBlue": { "message": "Biru" }
+  ,"colorGreen": { "message": "Hijau" }
+  ,"colorLightBlue": { "message": "Biru muda" }
+  ,"colorPink": { "message": "Merah muda" }
+  ,"colorRed": { "message": "Merah" }
+  ,"colorTeal": { "message": "Teal" }
+  ,"colorYellow": { "message": "Kuning" }
+  ,"colorWhite": { "message": "Putih" }
+  ,"buttonRenameProfile": { "message": "Ganti nama" }
+  ,"buttonDuplicateProfile": { "message": "Duplikat" }
+  ,"labelBinding": { "message": "Pengikatan" }
+  ,"buttonBindToStory": { "message": "Ikat ke cerita ini" }
+  ,"buttonUnbindFromStory": { "message": "Lepas" }
+  ,"promptRenameProfile": { "message": "Ganti nama profil:" }
+  ,"promptDuplicateProfile": { "message": "Nama duplikat:" }
 }
 
 

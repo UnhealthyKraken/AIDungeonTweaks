@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Restablecer sección Formato de texto" }
   ,"titleResetFont": { "message": "Restablecer sección Fuente" }
   ,"titleResetAll": { "message": "Restablecer todos los ajustes" }
+  ,"groupProfiles": { "message": "Perfiles" }
+  ,"labelProfile": { "message": "Perfil" }
+  ,"buttonSaveProfile": { "message": "Guardar como nuevo" }
+  ,"buttonDeleteProfile": { "message": "Eliminar perfil" }
+  ,"profileDefault": { "message": "Predeterminado" }
+  ,"promptProfileName": { "message": "Nombre del perfil:" }
+  ,"confirmDeleteProfile": { "message": "¿Eliminar este perfil?" }
+  ,"groupExportImport": { "message": "Exportar / Importar" }
+  ,"labelExportImport": { "message": "Copia de seguridad o restaurar ajustes" }
+  ,"buttonExport": { "message": "Exportar" }
+  ,"buttonImport": { "message": "Importar" }
+  ,"colorBlack": { "message": "Negro" }
+  ,"colorBlue": { "message": "Azul" }
+  ,"colorGreen": { "message": "Verde" }
+  ,"colorLightBlue": { "message": "Azul claro" }
+  ,"colorPink": { "message": "Rosa" }
+  ,"colorRed": { "message": "Rojo" }
+  ,"colorTeal": { "message": "Verde azulado" }
+  ,"colorYellow": { "message": "Amarillo" }
+  ,"colorWhite": { "message": "Blanco" }
+  ,"buttonRenameProfile": { "message": "Renombrar" }
+  ,"buttonDuplicateProfile": { "message": "Duplicar" }
+  ,"labelBinding": { "message": "Asociación" }
+  ,"buttonBindToStory": { "message": "Asociar a esta historia" }
+  ,"buttonUnbindFromStory": { "message": "Desasociar" }
+  ,"promptRenameProfile": { "message": "Renombrar perfil:" }
+  ,"promptDuplicateProfile": { "message": "Nombre del duplicado:" }
 }
 
 

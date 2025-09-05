@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Сбросить раздел Форматирование" }
   ,"titleResetFont": { "message": "Сбросить раздел Шрифт" }
   ,"titleResetAll": { "message": "Сбросить все настройки" }
+  ,"groupProfiles": { "message": "Профили" }
+  ,"labelProfile": { "message": "Профиль" }
+  ,"buttonSaveProfile": { "message": "Сохранить как новый" }
+  ,"buttonDeleteProfile": { "message": "Удалить профиль" }
+  ,"profileDefault": { "message": "По умолчанию" }
+  ,"promptProfileName": { "message": "Имя профиля:" }
+  ,"confirmDeleteProfile": { "message": "Удалить этот профиль?" }
+  ,"groupExportImport": { "message": "Экспорт / Импорт" }
+  ,"labelExportImport": { "message": "Резервное копирование или восстановление настроек" }
+  ,"buttonExport": { "message": "Экспорт" }
+  ,"buttonImport": { "message": "Импорт" }
+  ,"colorBlack": { "message": "Черный" }
+  ,"colorBlue": { "message": "Синий" }
+  ,"colorGreen": { "message": "Зеленый" }
+  ,"colorLightBlue": { "message": "Голубой" }
+  ,"colorPink": { "message": "Розовый" }
+  ,"colorRed": { "message": "Красный" }
+  ,"colorTeal": { "message": "Бирюзовый" }
+  ,"colorYellow": { "message": "Желтый" }
+  ,"colorWhite": { "message": "Белый" }
+  ,"buttonRenameProfile": { "message": "Переименовать" }
+  ,"buttonDuplicateProfile": { "message": "Дублировать" }
+  ,"labelBinding": { "message": "Привязка" }
+  ,"buttonBindToStory": { "message": "Привязать к этой истории" }
+  ,"buttonUnbindFromStory": { "message": "Отвязать" }
+  ,"promptRenameProfile": { "message": "Переименовать профиль:" }
+  ,"promptDuplicateProfile": { "message": "Имя копии:" }
 }
 
 

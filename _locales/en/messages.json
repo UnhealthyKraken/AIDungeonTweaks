@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Reset Text Formatting Section" }
   ,"titleResetFont": { "message": "Reset Font Section" }
   ,"titleResetAll": { "message": "Reset All Settings" }
+  ,"groupProfiles": { "message": "Profiles" }
+  ,"labelProfile": { "message": "Profile" }
+  ,"buttonSaveProfile": { "message": "Save as New" }
+  ,"buttonDeleteProfile": { "message": "Delete Profile" }
+  ,"profileDefault": { "message": "Default" }
+  ,"promptProfileName": { "message": "Profile name:" }
+  ,"confirmDeleteProfile": { "message": "Delete this profile?" }
+  ,"groupExportImport": { "message": "Export / Import" }
+  ,"labelExportImport": { "message": "Backup or restore settings" }
+  ,"buttonExport": { "message": "Export" }
+  ,"buttonImport": { "message": "Import" }
+  ,"colorBlack": { "message": "Black" }
+  ,"colorBlue": { "message": "Blue" }
+  ,"colorGreen": { "message": "Green" }
+  ,"colorLightBlue": { "message": "Light Blue" }
+  ,"colorPink": { "message": "Pink" }
+  ,"colorRed": { "message": "Red" }
+  ,"colorTeal": { "message": "Teal" }
+  ,"colorYellow": { "message": "Yellow" }
+  ,"colorWhite": { "message": "White" }
+  ,"buttonRenameProfile": { "message": "Rename" }
+  ,"buttonDuplicateProfile": { "message": "Duplicate" }
+  ,"labelBinding": { "message": "Binding" }
+  ,"buttonBindToStory": { "message": "Bind to this story" }
+  ,"buttonUnbindFromStory": { "message": "Unbind" }
+  ,"promptRenameProfile": { "message": "Rename profile:" }
+  ,"promptDuplicateProfile": { "message": "Duplicate name:" }
 }
 
 

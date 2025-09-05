@@ -194,6 +194,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const bgTypeReset = document.getElementById('bgTypeReset');
     const bgColorReset = document.getElementById('bgColorReset');
     const bgGradReset = document.getElementById('bgGradReset');
+    // Profiles & export/import
+    const profileSelect = document.getElementById('profileSelect');
+    const saveProfileBtn = document.getElementById('saveProfile');
+    const deleteProfileBtn = document.getElementById('deleteProfile');
+    const exportBtn = document.getElementById('exportSettings');
+    const importBtn = document.getElementById('importSettings');
+    // Extra UX controls for profiles
+    let renameProfileBtn, duplicateProfileBtn, bindProfileBtn, unbindProfileBtn;
+    // Per-story binding toggle in future could be added; for now, bind current page scope when saving via embedded panel context
     // Background UI visibility helpers
     const bgColorRow = (function(){ try { return bgColorInput ? bgColorInput.closest('.setting-item') : null; } catch(_) { return null; } })();
     const bgGradRow = (function(){ try { return bgGradInput ? bgGradInput.closest('.setting-item') : null; } catch(_) { return null; } })();
@@ -418,7 +427,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadSettings() {
         isLoadingSettings = true;
         if (typeof browser !== 'undefined' && browser.storage) {
-            const KEYS = ['speechBold', 'speechColor', 'monologueColor', 'monologueBold', 'sayBold', 'sayColor', 'doBold', 'doColor', 'mainBold', 'mainColor', 'capsEffect', 'keywordEffects', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'debug', 'debugFormatting', 'debugObserver', 'debugUI', 'syncEnabled', 'uiLanguage', 'bgType', 'bgColor', 'bgGrad'];
+            const KEYS = ['speechBold', 'speechColor', 'monologueColor', 'monologueBold', 'sayBold', 'sayColor', 'doBold', 'doColor', 'mainBold', 'mainColor', 'capsEffect', 'keywordEffects', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'debug', 'debugFormatting', 'debugObserver', 'debugUI', 'syncEnabled', 'uiLanguage', 'bgType', 'bgColor', 'bgGrad', 'profiles', 'activeProfileId'];
             const useSyncApi = (browser.storage.sync && typeof browser.storage.sync.get === 'function');
             const getter = (area) => area.get(KEYS);
             const safeGet = (area) => getter(area).catch(() => ({}));
@@ -433,7 +442,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return undefined;
                 };
                 const result = {};
-                ['speechBold','speechColor','monologueColor','monologueBold','sayBold','sayColor','doBold','doColor','mainBold','mainColor','capsEffect','keywordEffects','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','debug','debugFormatting','debugObserver','debugUI','syncEnabled','uiLanguage','bgType','bgColor','bgGrad'].forEach(k => { result[k] = pick(k); });
+                ['speechBold','speechColor','monologueColor','monologueBold','sayBold','sayColor','doBold','doColor','mainBold','mainColor','capsEffect','keywordEffects','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','debug','debugFormatting','debugObserver','debugUI','syncEnabled','uiLanguage','bgType','bgColor','bgGrad','profiles','activeProfileId'].forEach(k => { result[k] = pick(k); });
                 speechBoldToggle.checked = !!result.speechBold; // Default to false
                 speechColorSelect.value = result.speechColor || 'inherit'; // Default to inherit
                 monologueColorSelect.value = result.monologueColor || 'inherit'; // Default to inherit
@@ -500,6 +509,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderSwatches();
                 isLoadingSettings = false;
                 updateBackgroundVisibility();
+                // Populate profiles UI
+                try { populateProfiles(result.profiles || {}, result.activeProfileId || ''); } catch(_) {}
                 // Reconcile with the live page only when storage lacks background info and user isn't interacting
                 const hasBg = (
                     (typeof result.bgType === 'string' && result.bgType !== 'inherit') ||
@@ -515,6 +526,228 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         }
+    }
+
+    // Profiles helpers
+    function getCurrentSettingsSnapshot() {
+        return {
+            speechBold: speechBoldToggle?.checked || false,
+            speechColor: speechColorSelect?.value || 'inherit',
+            monologueColor: monologueColorSelect?.value || 'inherit',
+            monologueBold: monologueBoldToggle?.checked || false,
+            sayBold: sayBoldToggle?.checked || false,
+            sayColor: sayColorSelect?.value || 'inherit',
+            doBold: doBoldToggle?.checked || false,
+            doColor: doColorSelect?.value || 'inherit',
+            mainBold: mainBoldToggle?.checked || false,
+            mainColor: mainColorSelect?.value || 'inherit',
+            capsEffect: capsEffectSelect?.value || 'none',
+            keywordEffects: getKeywordsFromDOM(),
+            fontFamily: fontFamilySelect?.value || 'inherit',
+            fontSize: fontSizeSlider ? parseInt(fontSizeSlider.value, 10) : 16,
+            fontWeight: fontWeightSelect && fontWeightSelect.value !== '' ? parseInt(fontWeightSelect.value, 10) : undefined,
+            lineHeight: lineHeightSlider ? parseFloat(lineHeightSlider.value) : undefined,
+            letterSpacing: letterSpacingSlider ? (parseFloat(letterSpacingSlider.value) === 0 ? undefined : parseFloat(letterSpacingSlider.value)) : undefined,
+            textAlign: textAlignSelect ? textAlignSelect.value : 'inherit',
+            bgType: bgTypeSelect ? bgTypeSelect.value : 'inherit',
+            bgColor: (bgTypeSelect && bgTypeSelect.value === 'solid') ? (bgColorInput?.value || undefined) : undefined,
+            bgGrad: (bgTypeSelect && bgTypeSelect.value === 'gradient') ? (bgGradInput?.value || undefined) : undefined,
+        };
+    }
+
+    function populateProfiles(profilesMap, activeId) {
+        if (!profileSelect) return;
+        profileSelect.innerHTML = '';
+        const mk = (val, label) => { const o = document.createElement('option'); o.value = val; o.textContent = label; return o; };
+        profileSelect.appendChild(mk('', getMsg('profileDefault') || 'Default'));
+        Object.entries(profilesMap || {}).forEach(([id, prof]) => {
+            const name = (prof && prof.name) || id;
+            profileSelect.appendChild(mk(id, name));
+        });
+        profileSelect.value = activeId || '';
+        // Ensure UX buttons exist and are placed after the select row
+        try {
+            const row = profileSelect.closest('.setting-item');
+            if (row && !renameProfileBtn) {
+                renameProfileBtn = document.createElement('button');
+                renameProfileBtn.className = 'reset-btn reset-btn--label';
+                renameProfileBtn.textContent = getMsg('buttonRenameProfile') || 'Rename';
+                row.appendChild(renameProfileBtn);
+                duplicateProfileBtn = document.createElement('button');
+                duplicateProfileBtn.className = 'reset-btn reset-btn--label';
+                duplicateProfileBtn.textContent = getMsg('buttonDuplicateProfile') || 'Duplicate';
+                row.appendChild(duplicateProfileBtn);
+            }
+            const group = row?.parentElement;
+            if (group && !bindProfileBtn) {
+                const bindRow = document.createElement('div');
+                bindRow.className = 'setting-item';
+                const label = document.createElement('label');
+                label.textContent = getMsg('labelBinding') || 'Binding';
+                bindRow.appendChild(label);
+                bindRow.appendChild(document.createElement('div'));
+                const wrap = document.createElement('div');
+                wrap.style.display = 'flex'; wrap.style.gap = '8px';
+                bindProfileBtn = document.createElement('button');
+                bindProfileBtn.className = 'reset-btn reset-btn--label';
+                bindProfileBtn.textContent = getMsg('buttonBindToStory') || 'Bind to this story';
+                unbindProfileBtn = document.createElement('button');
+                unbindProfileBtn.className = 'reset-btn reset-btn--label';
+                unbindProfileBtn.textContent = getMsg('buttonUnbindFromStory') || 'Unbind';
+                wrap.appendChild(bindProfileBtn);
+                wrap.appendChild(unbindProfileBtn);
+                bindRow.appendChild(wrap);
+                group.appendChild(bindRow);
+            }
+        } catch(_) {}
+    }
+
+    async function saveProfileFlow() {
+        if (!browser?.storage?.local) return;
+        const name = prompt(getMsg('promptProfileName') || 'Profile name:');
+        if (!name) return;
+        const id = 'p_' + Date.now().toString(36);
+        const snap = getCurrentSettingsSnapshot();
+        const current = await browser.storage.local.get(['profiles','activeProfileId','profileBindings']).catch(() => ({}));
+        const profiles = Object.assign({}, current.profiles || {});
+        profiles[id] = { name, settings: snap };
+        const activeProfileId = id;
+        const bindings = Object.assign({}, current.profileBindings || {});
+        try {
+            // Bind current scope (host+path) if popup is embedded; otherwise skip binding
+            const isEmbedded = document.documentElement.getAttribute('data-embedded') === '1';
+            if (isEmbedded) {
+                const scope = (function(){ try { return new URL(document.referrer).hostname + (new URL(document.referrer).pathname || '/'); } catch(_) { return ''; } })();
+                if (scope) { bindings[scope] = id; }
+            }
+        } catch(_) {}
+        await browser.storage.local.set({ profiles, activeProfileId, profileBindings: bindings }).catch(() => {});
+        populateProfiles(profiles, activeProfileId);
+        // Apply immediately
+        try { if (browser.runtime?.sendMessage) browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings: snap, persist: true }); } catch(_) {}
+    }
+
+    async function deleteProfileFlow() {
+        if (!browser?.storage?.local) return;
+        const id = profileSelect?.value || '';
+        if (!id) return;
+        const ok = confirm(getMsg('confirmDeleteProfile') || 'Delete this profile?');
+        if (!ok) return;
+        const current = await browser.storage.local.get(['profiles','activeProfileId']).catch(() => ({}));
+        const profiles = Object.assign({}, current.profiles || {});
+        delete profiles[id];
+        const activeProfileId = '';
+        await browser.storage.local.set({ profiles, activeProfileId }).catch(() => {});
+        populateProfiles(profiles, activeProfileId);
+    }
+
+    function getCurrentScopeFromReferrer() {
+        try { return new URL(document.referrer).hostname + (new URL(document.referrer).pathname || '/'); } catch(_) { return ''; }
+    }
+
+    async function renameProfileFlow() {
+        const id = profileSelect?.value || '';
+        if (!id) return;
+        const current = await browser.storage.local.get(['profiles']).catch(() => ({}));
+        const profiles = Object.assign({}, current.profiles || {});
+        const prof = profiles[id];
+        if (!prof) return;
+        const name = prompt(getMsg('promptRenameProfile') || 'Rename profile:', prof.name || '');
+        if (!name) return;
+        profiles[id] = Object.assign({}, prof, { name });
+        await browser.storage.local.set({ profiles }).catch(() => {});
+        populateProfiles(profiles, id);
+    }
+
+    async function duplicateProfileFlow() {
+        const id = profileSelect?.value || '';
+        if (!id) return;
+        const current = await browser.storage.local.get(['profiles']).catch(() => ({}));
+        const profiles = Object.assign({}, current.profiles || {});
+        const prof = profiles[id];
+        if (!prof) return;
+        const newId = 'p_' + Date.now().toString(36);
+        const name = prompt(getMsg('promptDuplicateProfile') || 'Duplicate name:', (prof.name || 'Profile') + ' Copy');
+        if (!name) return;
+        profiles[newId] = { name, settings: prof.settings };
+        await browser.storage.local.set({ profiles, activeProfileId: newId }).catch(() => {});
+        populateProfiles(profiles, newId);
+    }
+
+    async function bindProfileFlow() {
+        const id = profileSelect?.value || '';
+        if (!id) return;
+        const scope = getCurrentScopeFromReferrer();
+        if (!scope) return;
+        const curr = await browser.storage.local.get(['profileBindings']).catch(() => ({}));
+        const bindings = Object.assign({}, curr.profileBindings || {});
+        bindings[scope] = id;
+        await browser.storage.local.set({ profileBindings: bindings }).catch(() => {});
+    }
+
+    async function unbindProfileFlow() {
+        const scope = getCurrentScopeFromReferrer();
+        if (!scope) return;
+        const curr = await browser.storage.local.get(['profileBindings']).catch(() => ({}));
+        const bindings = Object.assign({}, curr.profileBindings || {});
+        delete bindings[scope];
+        await browser.storage.local.set({ profileBindings: bindings }).catch(() => {});
+    }
+
+    async function applyProfileSelection() {
+        const id = profileSelect?.value || '';
+        if (!browser?.storage?.local) return;
+        await browser.storage.local.set({ activeProfileId: id }).catch(() => {});
+        if (!id) return; // Default (no override)
+        const current = await browser.storage.local.get(['profiles']).catch(() => ({}));
+        const prof = current?.profiles?.[id];
+        if (prof && prof.settings) {
+            // Push to content and persist
+            try { if (browser.runtime?.sendMessage) browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings: prof.settings, persist: true }); } catch(_) {}
+        }
+    }
+
+    // Export / Import
+    async function exportSettingsToFile() {
+        try {
+            const areas = await Promise.all([
+                browser.storage.local.get(null).catch(() => ({})),
+                (browser.storage.sync?.get ? browser.storage.sync.get(null).catch(() => ({})) : Promise.resolve({}))
+            ]);
+            const blob = new Blob([JSON.stringify({ local: areas[0] || {}, sync: areas[1] || {} }, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ai-dungeon-tweaks-settings-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(_) {} }, 0);
+        } catch(_) {}
+    }
+
+    function importSettingsFromFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/json';
+        input.addEventListener('change', async () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const json = JSON.parse(text);
+                const local = json?.local || {};
+                const sync = json?.sync || {};
+                // Basic sanitation: keep known keys only; rely on background prune too
+                const whitelist = ['speechBold','speechColor','monologueColor','monologueBold','sayBold','sayColor','doBold','doColor','mainBold','mainColor','capsEffect','keywordEffects','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','debug','debugFormatting','debugObserver','debugUI','syncEnabled','uiLanguage','bgType','bgColor','bgGrad','profiles','activeProfileId'];
+                const pick = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([k]) => whitelist.includes(k)));
+                await browser.storage.local.set(pick(local)).catch(() => {});
+                if (sync && sync.syncEnabled && browser.storage.sync?.set) {
+                    await browser.storage.sync.set(pick(sync)).catch(() => {});
+                }
+                loadSettings();
+            } catch(_) {}
+        });
+        input.click();
     }
     
     // Save settings and notify content script
@@ -605,8 +838,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Throttle saves to reduce churn while sliders are moving
+    // Throttle saves and reduce churn; avoid no-op writes and do per-key diffs
     let saveTimer;
+    let lastSaved = null;
+    let lastSavedObj = null;
     function saveSettings() {
         // Determine background values based on the selected type so defaults don't force Solid
         const selectedBgType = bgTypeSelect ? bgTypeSelect.value : 'inherit';
@@ -645,23 +880,52 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         // Do not force bgType here; rely on user selection or input listeners
         
-        // Save settings
+        // Save settings (only if changed)
         
         if (typeof browser !== 'undefined' && browser.storage) {
             try {
                 clearTimeout(saveTimer);
                 const doWrite = () => {
+                    // Cheap full-object compare to skip redundant work
+                    try {
+                        const curr = JSON.stringify(settings);
+                        if (lastSaved && curr === lastSaved) return;
+                        lastSaved = curr;
+                    } catch(_) {}
+                    const prev = lastSavedObj || {};
+                    const toSet = {};
+                    const toRemove = [];
+                    const keys = Object.keys(settings);
+                    for (const k of keys) {
+                        const nv = settings[k];
+                        const pv = prev[k];
+                        if (nv === undefined && pv !== undefined) { toRemove.push(k); continue; }
+                        if (nv !== undefined && nv !== pv) { toSet[k] = nv; }
+                    }
+                    for (const k of Object.keys(prev)) {
+                        if (settings[k] === undefined && prev[k] !== undefined && !toRemove.includes(k)) {
+                            toRemove.push(k);
+                        }
+                    }
                     const ops = [];
-                    if (browser.storage.local && typeof browser.storage.local.set === 'function') {
-                        ops.push(browser.storage.local.set(settings));
+                    if (browser.storage.local) {
+                        if (Object.keys(toSet).length) ops.push(browser.storage.local.set(toSet));
+                        if (toRemove.length && browser.storage.local.remove) ops.push(browser.storage.local.remove(toRemove));
                     }
-                    if (settings.syncEnabled && browser.storage.sync && typeof browser.storage.sync.set === 'function') {
-                        try { ops.push(browser.storage.sync.set(settings)); } catch(_) {}
+                    if (settings.syncEnabled && browser.storage.sync) {
+                        if (Object.keys(toSet).length && browser.storage.sync.set) ops.push(browser.storage.sync.set(toSet));
+                        // Skipping sync remove to minimize quota usage
                     }
-                    Promise.allSettled(ops).catch(() => {});
+                    Promise.allSettled(ops).finally(() => {
+                        try {
+                            const merged = Object.assign({}, prev, toSet);
+                            for (const k of toRemove) { delete merged[k]; }
+                            lastSavedObj = merged;
+                        } catch(_) {}
+                    }).catch(() => {});
                 };
-                // Short debounce for rapid changes (e.g., sliders); longer if syncing
-                saveTimer = setTimeout(doWrite, settings.syncEnabled ? 250 : 120);
+                // Debounce; give sync a bit more slack
+                saveTimer = setTimeout(doWrite, settings.syncEnabled ? 600 : 200);
             } catch(_) {}
             
             // Prefer tabs messaging when available; otherwise fall back to runtime.sendMessage
@@ -1273,4 +1537,15 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     } catch (_) {}
+
+    // Wire profiles & export/import
+    if (profileSelect) profileSelect.addEventListener('change', applyProfileSelection);
+    if (saveProfileBtn) saveProfileBtn.addEventListener('click', saveProfileFlow);
+    if (deleteProfileBtn) deleteProfileBtn.addEventListener('click', deleteProfileFlow);
+    if (renameProfileBtn) renameProfileBtn.addEventListener('click', renameProfileFlow);
+    if (duplicateProfileBtn) duplicateProfileBtn.addEventListener('click', duplicateProfileFlow);
+    if (bindProfileBtn) bindProfileBtn.addEventListener('click', bindProfileFlow);
+    if (unbindProfileBtn) unbindProfileBtn.addEventListener('click', unbindProfileFlow);
+    if (exportBtn) exportBtn.addEventListener('click', exportSettingsToFile);
+    if (importBtn) importBtn.addEventListener('click', importSettingsFromFile);
 });

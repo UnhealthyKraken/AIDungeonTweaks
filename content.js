@@ -308,14 +308,14 @@
             // This is *"text" without trailing * - format as italic speech (remove the asterisk but PRESERVE quotes)
             const boldClass = settings.monologueBold ? ' ai-italic-speech-bold' : '';
             const style = settings.monologueColor !== 'inherit' ? ` style="color: ${settings.monologueColor};"` : '';
-            console.log('AI Dungeon Tweaks: Formatting as italic speech:', fullMatch, '->', `"<em class="ai-italic-speech${boldClass}"${style}>${content}</em>"`);
+            if (debugFormatting) console.log('AI Dungeon Tweaks: Formatting as italic speech:', fullMatch, '->', `"<em class="ai-italic-speech${boldClass}"${style}>${content}</em>"`);
             addMonologue(content);
             return `"<em class=\"ai-italic-speech${boldClass}\"${style}>${content}</em>"`;
         });
         
         // Also handle incomplete patterns like *"text" (without closing quote)
         const result2 = result.replace(/\*"([^"]*)$/g, (fullMatch, content) => {
-            console.log('AI Dungeon Tweaks: Found incomplete pattern:', fullMatch);
+            if (debugFormatting) console.log('AI Dungeon Tweaks: Found incomplete pattern:', fullMatch);
             const boldClass = settings.monologueBold ? ' ai-italic-speech-bold' : '';
             const style = settings.monologueColor !== 'inherit' ? ` style="color: ${settings.monologueColor};"` : '';
             addMonologue(content);
@@ -536,7 +536,7 @@
                         if (quoteContent.includes('=') || quoteContent.includes('style') || quoteContent.includes('class') || 
                             quoteContent.includes('ai-italic-speech') || quoteContent.includes('color:') || 
                             quoteContent.includes('feca57') || quoteContent.includes('45b7d1')) {
-                            console.log('AI Dungeon Tweaks: Skipping speech formatting - quote content appears to be HTML attribute or styling:', quoteContent);
+                            if (debugFormatting) console.log('AI Dungeon Tweaks: Skipping speech formatting - quote content appears to be HTML attribute or styling:', quoteContent);
                             continue;
                         }
                         // Check if this quote content was just formatted as italic speech
@@ -787,23 +787,35 @@
     // Function to observe DOM changes
     function setupObserver() {
         // Create a MutationObserver to watch for changes
+        let pending = false;
+        let wantFormat = false;
+        let wantCleanup = false;
+        const flush = () => {
+            try {
+                if (wantCleanup) {
+                    setTimeout(cleanupExistingArtifacts, 50);
+                }
+                if (wantFormat) {
+                    setTimeout(formatAllTargetElements, 100);
+                }
+            } finally {
+                pending = false; wantFormat = false; wantCleanup = false;
+            }
+        };
         const observer = new MutationObserver(function(mutations) {
-            let shouldFormat = false;
-            let shouldCleanup = false;
-            
             mutations.forEach(function(mutation) {
                 // Check if any of the target elements were added or modified
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach(function(node) {
                         if (node.nodeType === Node.ELEMENT_NODE) {
                             if (node.matches && node.matches(TARGET_SELECTOR)) {
-                                shouldFormat = true;
+                                wantFormat = true;
                             } else if (node.querySelector && node.querySelector(TARGET_SELECTOR)) {
-                                shouldFormat = true;
+                                wantFormat = true;
                             }
                         } else if (node.nodeType === Node.TEXT_NODE && node.textContent && node.textContent.includes('ai-')) {
                             // Immediately clean up any text node containing ai-* fragments
-                            shouldCleanup = true;
+                            wantCleanup = true;
                             const cleanText = cleanTextBeforeFormatting(node.textContent);
                             if (cleanText !== node.textContent) {
                                 node.textContent = cleanText;
@@ -815,7 +827,7 @@
                     let parent = mutation.target.parentNode;
                     while (parent && parent !== document) {
                         if (parent.matches && parent.matches(TARGET_SELECTOR)) {
-                            shouldFormat = true;
+                            wantFormat = true;
                             break;
                         }
                         parent = parent.parentNode;
@@ -823,7 +835,7 @@
                     
                     // Also check if the mutation itself contains ai-* fragments
                     if (mutation.target.textContent && mutation.target.textContent.includes('ai-')) {
-                        shouldCleanup = true;
+                        wantCleanup = true;
                         const cleanText = cleanTextBeforeFormatting(mutation.target.textContent);
                         if (cleanText !== mutation.target.textContent) {
                             mutation.target.textContent = cleanText;
@@ -831,16 +843,7 @@
                     }
                 }
             });
-            
-            if (shouldCleanup) {
-                // Run immediate cleanup if we found artifacts
-                setTimeout(cleanupExistingArtifacts, 50);
-            }
-            
-            if (shouldFormat) {
-                // Small delay to ensure DOM is fully updated
-                setTimeout(formatAllTargetElements, 100);
-            }
+            if (!pending && (wantFormat || wantCleanup)) { pending = true; queueMicrotask(flush); }
         });
         
         // Start observing - prefer scoping to gameplay output if present
@@ -878,7 +881,7 @@
             const handle = (label) => {
                 if (!label) return false;
                 if (label.includes('continue') || label.includes('retry') || label.includes('generate') || label.includes('submit') || label.includes('send') || label.includes('edit') || label.includes('erase')) {
-                    console.log('AI Dungeon Tweaks: AI Dungeon button clicked, waiting for new content...');
+                    if (debugObserver) console.log('AI Dungeon Tweaks: AI Dungeon button clicked, waiting for new content...');
                     if (label.includes('edit')) {
                         suppressItalicDuringEdit = true;
                         waitForEditCompletion();
@@ -1190,8 +1193,31 @@
     
     // Function to initialize the extension
     function init() {
-        // Load settings first
-        loadSettings();
+        // Auto-apply bound profile by scope before initial load
+        try {
+            if (typeof browser !== 'undefined' && browser.storage && browser.storage.local) {
+                const scope = (function(){ try { return location.hostname + (location.pathname || '/'); } catch(_) { return ''; } })();
+                if (scope) {
+                    browser.storage.local.get(['profiles','profileBindings','activeProfileId']).then((res) => {
+                        try {
+                            const profiles = res && res.profiles || {};
+                            const bindings = res && res.profileBindings || {};
+                            const boundId = bindings[scope] || res.activeProfileId || '';
+                            const prof = boundId ? profiles[boundId] : null;
+                            if (prof && prof.settings) {
+                                updateSettings(prof.settings);
+                            }
+                        } catch(_) {}
+                        // Then load settings to ensure storage overrides merged
+                        loadSettings();
+                    }).catch(() => loadSettings());
+                } else {
+                    loadSettings();
+                }
+            } else {
+                loadSettings();
+            }
+        } catch(_) { loadSettings(); }
         
         // Clean up any existing malformed fragments first
         cleanupExistingArtifacts();
@@ -1407,14 +1433,44 @@
                     // Load Google Fonts if requested, indicate brief loading state on container
                     if (settings.fontFamily && typeof settings.fontFamily === 'string' && settings.fontFamily.startsWith('g:')) {
                         const fam = settings.fontFamily.slice(2);
-                        if (!document.querySelector(`link[data-ai-gfont="${fam}"]`)) {
+                        if (!document.querySelector('link[data-ai-gfont-preconnect]')) {
+                            try {
+                                const pc = document.createElement('link');
+                                pc.rel = 'preconnect';
+                                pc.href = 'https://fonts.gstatic.com';
+                                pc.crossOrigin = 'anonymous';
+                                pc.setAttribute('data-ai-gfont-preconnect','1');
+                                document.head.appendChild(pc);
+                            } catch(_) {}
+                            try {
+                                const pc2 = document.createElement('link');
+                                pc2.rel = 'preconnect';
+                                pc2.href = 'https://fonts.googleapis.com';
+                                pc2.setAttribute('data-ai-gfont-preconnect','1');
+                                document.head.appendChild(pc2);
+                            } catch(_) {}
+                        }
+                        const cacheKey = 'ai_gfont_loaded_' + fam;
+                        let alreadyLoaded = false;
+                        try { alreadyLoaded = sessionStorage.getItem(cacheKey) === '1'; } catch(_) {}
+                        if (!alreadyLoaded && !document.querySelector(`link[data-ai-gfont="${fam}"]`)) {
                             try { element.setAttribute('aria-busy', 'true'); } catch (_) {}
                             const link = document.createElement('link');
                             link.rel = 'stylesheet';
                             link.setAttribute('data-ai-gfont', fam);
                             link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fam)}:wght@400;500;700&display=swap`;
-                            link.addEventListener('load', () => { try { element.removeAttribute('aria-busy'); } catch (_) {} });
-                            link.addEventListener('error', () => { try { element.removeAttribute('aria-busy'); } catch (_) {} });
+                            let attempt = 0;
+                            const onDone = () => { try { element.removeAttribute('aria-busy'); } catch (_) {} try { sessionStorage.setItem(cacheKey, '1'); } catch(_) {} };
+                            const onError = () => {
+                                attempt += 1;
+                                try { element.removeAttribute('aria-busy'); } catch (_) {}
+                                if (attempt <= 3) {
+                                    const delay = attempt === 1 ? 300 : attempt === 2 ? 1000 : 3000;
+                                    setTimeout(() => { try { document.head.removeChild(link); } catch(_) {} document.head.appendChild(link); try { element.setAttribute('aria-busy','true'); } catch(_) {} }, delay);
+                                }
+                            };
+                            link.addEventListener('load', onDone);
+                            link.addEventListener('error', onError);
                             document.head.appendChild(link);
                         }
                     }
@@ -1773,13 +1829,31 @@
                 popupUrl = u.toString();
             }
         } catch(_) {}
-        panel.innerHTML = `
-            <div class="aid-panel__header"></div>
-            <button class="aid-panel__close" aria-label="Close">✕</button>
-            <div class="aid-panel__body">
-              ${popupUrl ? `<iframe src="${popupUrl}" class="aid-panel__iframe" allowtransparency="true" referrerpolicy="no-referrer"></iframe>` : `<div class=\"aid-panel__empty\">Open the extension popup for full options.</div>`}
-            </div>
-        `;
+        // Build panel DOM safely without innerHTML
+        const header = document.createElement('div');
+        header.className = 'aid-panel__header';
+        const close = document.createElement('button');
+        close.className = 'aid-panel__close';
+        close.setAttribute('aria-label','Close');
+        close.textContent = '✕';
+        const body = document.createElement('div');
+        body.className = 'aid-panel__body';
+        if (popupUrl) {
+            const iframe = document.createElement('iframe');
+            iframe.className = 'aid-panel__iframe';
+            iframe.setAttribute('allowtransparency','true');
+            iframe.setAttribute('referrerpolicy','no-referrer');
+            iframe.src = popupUrl;
+            body.appendChild(iframe);
+        } else {
+            const empty = document.createElement('div');
+            empty.className = 'aid-panel__empty';
+            empty.textContent = 'Open the extension popup for full options.';
+            body.appendChild(empty);
+        }
+        panel.appendChild(header);
+        panel.appendChild(close);
+        panel.appendChild(body);
         try {
             const iframe = panel.querySelector('iframe');
             if (iframe && iframe.src && !/embedded=1/.test(iframe.src)) {
@@ -1807,29 +1881,34 @@
     }
 
     // Listen for messages from popup/options page
+    function getProfileScope() {
+        try {
+            return String(location.hostname + (location.pathname || '/'));
+        } catch(_) { return ''; }
+    }
+
     if (typeof browser !== 'undefined' && browser.runtime) {
-        const onMsg = (message) => {
-            if (message && message.type === 'UPDATE_SETTINGS') {
-                updateSettings(message.settings || {});
-                if (message.persist) {
-                    try { saveSettings(); } catch(_) {}
+        const onMsg = (message, sender, sendResponse) => {
+            try {
+                if (!message || !message.type) return;
+                if (message.type === 'UPDATE_SETTINGS') {
+                    updateSettings(message.settings || {});
+                    if (message.persist) {
+                        try { saveSettings(); } catch(_) {}
+                    }
+                    return;
                 }
-            }
-            if (message && message.type === 'OPEN_EMBEDDED_PANEL') {
-                try { openEmbeddedPanel(message.open); } catch(_) {}
-            }
+                if (message.type === 'OPEN_EMBEDDED_PANEL') {
+                    try { openEmbeddedPanel(message.open); } catch(_) {}
+                    return;
+                }
+                if (message.type === 'REQUEST_SETTINGS') {
+                    try { sendResponse && sendResponse({ settings, scope: getProfileScope() }); } catch(_) {}
+                    return;
+                }
+            } catch(_) {}
         };
         try { browser.runtime.onMessage.addListener(onMsg); } catch (_) {}
-        // Provide current settings to popup on demand
-        try {
-            browser.runtime.onMessage.addListener(function(message, sender, sendResponse) {
-                try {
-                    if (message && message.type === 'REQUEST_SETTINGS') {
-                        try { sendResponse({ settings }); } catch(_) {}
-                    }
-                } catch(_) {}
-            });
-        } catch(_) {}
         // Fallback for direct window postMessage from iframe with origin validation
         try {
             window.addEventListener('message', (e) => {

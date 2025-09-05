@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Redefinir seção Formatação" }
   ,"titleResetFont": { "message": "Redefinir seção Fonte" }
   ,"titleResetAll": { "message": "Redefinir todas as configurações" }
+  ,"groupProfiles": { "message": "Perfis" }
+  ,"labelProfile": { "message": "Perfil" }
+  ,"buttonSaveProfile": { "message": "Salvar como novo" }
+  ,"buttonDeleteProfile": { "message": "Excluir perfil" }
+  ,"profileDefault": { "message": "Padrão" }
+  ,"promptProfileName": { "message": "Nome do perfil:" }
+  ,"confirmDeleteProfile": { "message": "Excluir este perfil?" }
+  ,"groupExportImport": { "message": "Exportar / Importar" }
+  ,"labelExportImport": { "message": "Fazer backup ou restaurar configurações" }
+  ,"buttonExport": { "message": "Exportar" }
+  ,"buttonImport": { "message": "Importar" }
+  ,"colorBlack": { "message": "Preto" }
+  ,"colorBlue": { "message": "Azul" }
+  ,"colorGreen": { "message": "Verde" }
+  ,"colorLightBlue": { "message": "Azul claro" }
+  ,"colorPink": { "message": "Rosa" }
+  ,"colorRed": { "message": "Vermelho" }
+  ,"colorTeal": { "message": "Verde-azulado" }
+  ,"colorYellow": { "message": "Amarelo" }
+  ,"colorWhite": { "message": "Branco" }
+  ,"buttonRenameProfile": { "message": "Renomear" }
+  ,"buttonDuplicateProfile": { "message": "Duplicar" }
+  ,"labelBinding": { "message": "Vínculo" }
+  ,"buttonBindToStory": { "message": "Vincular a esta história" }
+  ,"buttonUnbindFromStory": { "message": "Desvincular" }
+  ,"promptRenameProfile": { "message": "Renomear perfil:" }
+  ,"promptDuplicateProfile": { "message": "Nome do duplicado:" }
 }
 
 

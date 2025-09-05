@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "「テキスト整形」セクションをリセット" }
   ,"titleResetFont": { "message": "「フォント」セクションをリセット" }
   ,"titleResetAll": { "message": "すべての設定をリセット" }
+  ,"groupProfiles": { "message": "プロファイル" }
+  ,"labelProfile": { "message": "プロファイル" }
+  ,"buttonSaveProfile": { "message": "新規保存" }
+  ,"buttonDeleteProfile": { "message": "プロファイルを削除" }
+  ,"profileDefault": { "message": "デフォルト" }
+  ,"promptProfileName": { "message": "プロファイル名:" }
+  ,"confirmDeleteProfile": { "message": "このプロファイルを削除しますか？" }
+  ,"groupExportImport": { "message": "エクスポート / インポート" }
+  ,"labelExportImport": { "message": "設定をバックアップまたは復元" }
+  ,"buttonExport": { "message": "エクスポート" }
+  ,"buttonImport": { "message": "インポート" }
+  ,"colorBlack": { "message": "黒" }
+  ,"colorBlue": { "message": "青" }
+  ,"colorGreen": { "message": "緑" }
+  ,"colorLightBlue": { "message": "水色" }
+  ,"colorPink": { "message": "ピンク" }
+  ,"colorRed": { "message": "赤" }
+  ,"colorTeal": { "message": "青緑" }
+  ,"colorYellow": { "message": "黄" }
+  ,"colorWhite": { "message": "白" }
+  ,"buttonRenameProfile": { "message": "名前変更" }
+  ,"buttonDuplicateProfile": { "message": "複製" }
+  ,"labelBinding": { "message": "バインド" }
+  ,"buttonBindToStory": { "message": "このストーリーにバインド" }
+  ,"buttonUnbindFromStory": { "message": "バインド解除" }
+  ,"promptRenameProfile": { "message": "プロファイル名を変更:" }
+  ,"promptDuplicateProfile": { "message": "複製名:" }
 }
 
 

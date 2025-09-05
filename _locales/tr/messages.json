@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "Metin biçimlendirme bölümünü sıfırla" }
   ,"titleResetFont": { "message": "Yazı tipi bölümünü sıfırla" }
   ,"titleResetAll": { "message": "Tüm ayarları sıfırla" }
+  ,"groupProfiles": { "message": "Profiller" }
+  ,"labelProfile": { "message": "Profil" }
+  ,"buttonSaveProfile": { "message": "Yeni olarak kaydet" }
+  ,"buttonDeleteProfile": { "message": "Profili sil" }
+  ,"profileDefault": { "message": "Varsayılan" }
+  ,"promptProfileName": { "message": "Profil adı:" }
+  ,"confirmDeleteProfile": { "message": "Bu profil silinsin mi?" }
+  ,"groupExportImport": { "message": "Dışa/İçe aktar" }
+  ,"labelExportImport": { "message": "Ayarları yedekle veya geri yükle" }
+  ,"buttonExport": { "message": "Dışa aktar" }
+  ,"buttonImport": { "message": "İçe aktar" }
+  ,"colorBlack": { "message": "Siyah" }
+  ,"colorBlue": { "message": "Mavi" }
+  ,"colorGreen": { "message": "Yeşil" }
+  ,"colorLightBlue": { "message": "Açık mavi" }
+  ,"colorPink": { "message": "Pembe" }
+  ,"colorRed": { "message": "Kırmızı" }
+  ,"colorTeal": { "message": "Deniz mavisi" }
+  ,"colorYellow": { "message": "Sarı" }
+  ,"colorWhite": { "message": "Beyaz" }
+  ,"buttonRenameProfile": { "message": "Yeniden adlandır" }
+  ,"buttonDuplicateProfile": { "message": "Kopyala" }
+  ,"labelBinding": { "message": "Bağlama" }
+  ,"buttonBindToStory": { "message": "Bu hikayeye bağla" }
+  ,"buttonUnbindFromStory": { "message": "Bağlamayı kaldır" }
+  ,"promptRenameProfile": { "message": "Profili yeniden adlandır:" }
+  ,"promptDuplicateProfile": { "message": "Kopya adı:" }
 }
 
 

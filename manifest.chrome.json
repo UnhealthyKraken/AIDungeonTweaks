@@ -14,7 +14,6 @@
     "*://*.aidungeon.io/*",
     "*://*.aidungeon.com/*"
   ],
-  
   "content_scripts": [
     {
       "matches": [
@@ -26,14 +25,12 @@
       "run_at": "document_end"
     }
   ],
-  
   "icons": {
     "16": "icon48.png",
     "48": "icon48.png",
     "96": "icon96.png",
     "128": "icon96.png"
   },
-  
   "action": {
     "default_title": "__MSG_actionTitle__",
     "default_icon": {
@@ -45,13 +42,7 @@
     }
   },
   "background": {
-    "scripts": ["background.js"]
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "aidungeon-formatter@kraken",
-      "strict_min_version": "109.0"
-    }
+    "service_worker": "background.js"
   },
   "web_accessible_resources": [
     {
@@ -60,3 +51,4 @@
     }
   ]
 }
+

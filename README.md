@@ -1,4 +1,4 @@
-# AI Dungeon Tweaks - Firefox Extension
+# AI Dungeon Tweaks - Browser Extension (Firefox & Chrome)
 
 This Firefox browser extension tweaks and formats AI Dungeon story text to properly display asterisk‑wrapped text as italicized content.
 
@@ -61,14 +61,22 @@ When the AI in AIDungeon uses text formatting, this extension automatically conv
 
 ## Installation
 
-### Temporary Installation (for testing)
+### Firefox (temporary install for testing)
 1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
 2. Click "Load Temporary Add-on..."
-3. Select this folder's `manifest.json`
+3. Select this folder's `manifest.json` (the Firefox manifest)
 4. The extension installs temporarily and works until you restart Firefox
 
-### Permanent Installation
+### Firefox (packaging / permanent)
 To publish permanently, package and submit to AMO (addons.mozilla.org). For local permanent installs, Firefox restricts unsigned add-ons unless using Developer Edition with the signing requirement disabled.
+
+### Chrome/Edge (temporary install for testing)
+1. Open `chrome://extensions` (or `edge://extensions`) and enable Developer mode
+2. Click "Load unpacked"
+3. Select this folder after copying/renaming `manifest.chrome.json` to `manifest.json`, or point to the folder with a symlinked manifest
+
+### Chrome/Edge (packaging)
+Zip the folder with `manifest.json` set to the Chrome manifest (service worker). Upload to the Chrome Web Store (or Edge Add-ons) following their publishing guidelines.
 
 ## How it works
 
@@ -84,6 +92,7 @@ The extension:
 ## Files
 
 - `manifest.json` - MV3 configuration (Firefox uses `background.scripts`)
+- `manifest.chrome.json` - MV3 configuration for Chrome/Edge (uses `background.service_worker`)
 - `background.js` - Action click handler and storage hygiene
 - `content.js` - Formatting logic injected into AI Dungeon pages
 - `popup.html` / `popup.js` / `styles.css` - Settings UI (toolbar or embedded)
@@ -134,9 +143,18 @@ If you see "background.service_worker is currently disabled", switch the manifes
 
 ## Build, Release & Packaging
 
-- Versioning: Update the `version` in `manifest.json` and document changes in a `CHANGELOG` (optional).
-- Packaging for AMO: Zip the folder contents (including `manifest.json`) and upload to `addons.mozilla.org`.
-- Temporary install for testing: use `about:debugging#/runtime/this-firefox` → Load Temporary Add‑on → `manifest.json`.
+- Versioning: Update the `version` in `manifest.json` and document changes in `CHANGELOG.md`.
+- Optional build step: simple script to swap manifests before packaging (e.g., `copy manifest.chrome.json manifest.json`).
+
+### GitHub Actions (CI)
+
+This repo includes a GitHub Actions workflow that:
+- Lints the extension using `web-ext` (Firefox)
+- Packages Firefox and Chrome zip artifacts
+
+Artifacts appear in the Actions run as `firefox-zip` and `chrome-zip`.
+
+Trigger: pushes to `main` or any pull request. See `.github/workflows/ci.yml`.
 
 
 ## Uninstalling

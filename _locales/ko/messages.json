@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "텍스트 서식 섹션 초기화" }
   ,"titleResetFont": { "message": "글꼴 섹션 초기화" }
   ,"titleResetAll": { "message": "모든 설정 초기화" }
+  ,"groupProfiles": { "message": "프로필" }
+  ,"labelProfile": { "message": "프로필" }
+  ,"buttonSaveProfile": { "message": "새로 저장" }
+  ,"buttonDeleteProfile": { "message": "프로필 삭제" }
+  ,"profileDefault": { "message": "기본" }
+  ,"promptProfileName": { "message": "프로필 이름:" }
+  ,"confirmDeleteProfile": { "message": "이 프로필을 삭제할까요?" }
+  ,"groupExportImport": { "message": "내보내기 / 가져오기" }
+  ,"labelExportImport": { "message": "설정을 백업 또는 복원" }
+  ,"buttonExport": { "message": "내보내기" }
+  ,"buttonImport": { "message": "가져오기" }
+  ,"colorBlack": { "message": "검정" }
+  ,"colorBlue": { "message": "파랑" }
+  ,"colorGreen": { "message": "초록" }
+  ,"colorLightBlue": { "message": "하늘색" }
+  ,"colorPink": { "message": "핑크" }
+  ,"colorRed": { "message": "빨강" }
+  ,"colorTeal": { "message": "청록" }
+  ,"colorYellow": { "message": "노랑" }
+  ,"colorWhite": { "message": "하양" }
+  ,"buttonRenameProfile": { "message": "이름 변경" }
+  ,"buttonDuplicateProfile": { "message": "복제" }
+  ,"labelBinding": { "message": "바인딩" }
+  ,"buttonBindToStory": { "message": "이 스토리에 바인딩" }
+  ,"buttonUnbindFromStory": { "message": "해제" }
+  ,"promptRenameProfile": { "message": "프로필 이름 변경:" }
+  ,"promptDuplicateProfile": { "message": "복제 이름:" }
 }
 
 

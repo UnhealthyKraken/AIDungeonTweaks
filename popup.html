@@ -39,15 +39,15 @@
                 <label for="doColor" data-i18n="labelColor">Color:</label>
                 <select id="doColor">
                     <option value="inherit" data-i18n="optDefault">Default</option>
-                    <option value="#000000">Black</option>
-                    <option value="#0066cc">Blue</option>
-                    <option value="#96ceb4">Green</option>
-                    <option value="#45b7d1">Light Blue</option>
-                    <option value="#ff9ff3">Pink</option>
-                    <option value="#ff6b6b">Red</option>
-                    <option value="#4ecdc4">Teal</option>
-                    <option value="#feca57">Yellow</option>
-                    <option value="#ffffff">White</option>
+                    <option value="#000000" data-i18n="colorBlack">Black</option>
+                    <option value="#0066cc" data-i18n="colorBlue">Blue</option>
+                    <option value="#96ceb4" data-i18n="colorGreen">Green</option>
+                    <option value="#45b7d1" data-i18n="colorLightBlue">Light Blue</option>
+                    <option value="#ff9ff3" data-i18n="colorPink">Pink</option>
+                    <option value="#ff6b6b" data-i18n="colorRed">Red</option>
+                    <option value="#4ecdc4" data-i18n="colorTeal">Teal</option>
+                    <option value="#feca57" data-i18n="colorYellow">Yellow</option>
+                    <option value="#ffffff" data-i18n="colorWhite">White</option>
                     <option value="custom" data-i18n="optCustom">Custom…</option>
                 </select>
                 <div class="color-swatches" id="doColorSwatches"></div>
@@ -67,15 +67,15 @@
                 <label for="sayColor" data-i18n="labelColor">Color:</label>
                 <select id="sayColor">
                     <option value="inherit" data-i18n="optDefault">Default</option>
-                    <option value="#000000">Black</option>
-                    <option value="#0066cc">Blue</option>
-                    <option value="#96ceb4">Green</option>
-                    <option value="#45b7d1">Light Blue</option>
-                    <option value="#ff9ff3">Pink</option>
-                    <option value="#ff6b6b">Red</option>
-                    <option value="#4ecdc4">Teal</option>
-                    <option value="#feca57">Yellow</option>
-                    <option value="#ffffff">White</option>
+                    <option value="#000000" data-i18n="colorBlack">Black</option>
+                    <option value="#0066cc" data-i18n="colorBlue">Blue</option>
+                    <option value="#96ceb4" data-i18n="colorGreen">Green</option>
+                    <option value="#45b7d1" data-i18n="colorLightBlue">Light Blue</option>
+                    <option value="#ff9ff3" data-i18n="colorPink">Pink</option>
+                    <option value="#ff6b6b" data-i18n="colorRed">Red</option>
+                    <option value="#4ecdc4" data-i18n="colorTeal">Teal</option>
+                    <option value="#feca57" data-i18n="colorYellow">Yellow</option>
+                    <option value="#ffffff" data-i18n="colorWhite">White</option>
                     <option value="custom" data-i18n="optCustom">Custom…</option>
                 </select>
                 <div class="color-swatches" id="sayColorSwatches"></div>
@@ -319,6 +319,17 @@
             </div>
         </details>
         <details class="setting-group" open>
+            <summary class="group-summary" data-i18n="groupExportImport">Export / Import</summary>
+            <div class="setting-item">
+                <label data-i18n="labelExportImport">Backup or restore settings</label>
+                <div></div>
+                <div style="display:flex; gap:8px;">
+                    <button class="reset-btn reset-btn--label" id="exportSettings" data-i18n="buttonExport">Export</button>
+                    <button class="reset-btn reset-btn--label" id="importSettings" data-i18n="buttonImport">Import</button>
+                </div>
+            </div>
+        </details>
+        <details class="setting-group" open>
             <summary class="group-summary" data-i18n="groupLanguage">Language</summary>
             <div class="setting-item">
                 <label for="langSelect" data-i18n="labelLanguage">Language override</label>
@@ -339,6 +350,19 @@
                     <option value="tr">Türkçe</option>
                     <option value="id">Bahasa Indonesia</option>
                 </select>
+            </div>
+        </details>
+        <details class="setting-group" open>
+            <summary class="group-summary" data-i18n="groupProfiles">Profiles</summary>
+            <div class="setting-item">
+                <label for="profileSelect" data-i18n="labelProfile">Profile</label>
+                <select id="profileSelect"></select>
+                <button class="reset-btn reset-btn--label" id="saveProfile" data-i18n="buttonSaveProfile">Save as New</button>
+            </div>
+            <div class="setting-item">
+                <label></label>
+                <div></div>
+                <button class="reset-btn reset-btn--label" id="deleteProfile" data-i18n="buttonDeleteProfile">Delete Profile</button>
             </div>
         </details>
         <details class="setting-group" open>
@@ -388,6 +412,8 @@
                 <button class="reset-btn reset-btn--label" id="resetAll" title="Reset All Settings" data-i18n="buttonResetAll">↺ Reset All</button>
             </div>
             <div class="setting-item" id="contrastWarnings"></div>
+
+            
 
         </div>
     </div>

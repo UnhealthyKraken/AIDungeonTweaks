@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2 – 2025-09-05
+- Cross-browser: added Chrome MV3 manifest (service_worker). Bumped version to 1.2.
+- Profiles: per-story bindings (host+path) auto-apply; Profiles UI: bind/unbind, rename, duplicate.
+- i18n: added color/profile strings (en); prepared for locale propagation.
+- Storage/Popup: reduced redundant writes via change detection; groundwork for per-key diffs.
+- Security: embedded panel constructed via DOM APIs (no innerHTML).
+- Fonts: preconnect to fonts.googleapis.com; retry/backoff on load; session cache per family.
+- UI: moved Profiles and Export/Import under Misc in alphabetical order.
+
 ## 1.1 – 2025-09-05
 - Migrated to Manifest V3 (Firefox using background.scripts).
 - Refactored settings load logic; added storage schema version and pruning.

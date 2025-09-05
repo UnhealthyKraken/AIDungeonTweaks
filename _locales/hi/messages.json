@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "पाठ स्वरूपण अनुभाग रीसेट करें" }
   ,"titleResetFont": { "message": "फ़ॉन्ट अनुभाग रीसेट करें" }
   ,"titleResetAll": { "message": "सभी सेटिंग्स रीसेट करें" }
+  ,"groupProfiles": { "message": "प्रोफाइल" }
+  ,"labelProfile": { "message": "प्रोफाइल" }
+  ,"buttonSaveProfile": { "message": "नए रूप में सहेजें" }
+  ,"buttonDeleteProfile": { "message": "प्रोफाइल हटाएँ" }
+  ,"profileDefault": { "message": "डिफ़ॉल्ट" }
+  ,"promptProfileName": { "message": "प्रोफाइल नाम:" }
+  ,"confirmDeleteProfile": { "message": "क्या इस प्रोफाइल को हटाना है?" }
+  ,"groupExportImport": { "message": "निर्यात / आयात" }
+  ,"labelExportImport": { "message": "सेटिंग्स बैकअप या पुनर्स्थापित करें" }
+  ,"buttonExport": { "message": "निर्यात" }
+  ,"buttonImport": { "message": "आयात" }
+  ,"colorBlack": { "message": "काला" }
+  ,"colorBlue": { "message": "नीला" }
+  ,"colorGreen": { "message": "हरा" }
+  ,"colorLightBlue": { "message": "हल्का नीला" }
+  ,"colorPink": { "message": "गुलाबी" }
+  ,"colorRed": { "message": "लाल" }
+  ,"colorTeal": { "message": "टील" }
+  ,"colorYellow": { "message": "पीला" }
+  ,"colorWhite": { "message": "सफेद" }
+  ,"buttonRenameProfile": { "message": "नाम बदलें" }
+  ,"buttonDuplicateProfile": { "message": "डुप्लिकेट" }
+  ,"labelBinding": { "message": "बाइंडिंग" }
+  ,"buttonBindToStory": { "message": "इस कहानी से बाँधें" }
+  ,"buttonUnbindFromStory": { "message": "अनबाइंड" }
+  ,"promptRenameProfile": { "message": "प्रोफाइल का नाम बदलें:" }
+  ,"promptDuplicateProfile": { "message": "डुप्लिकेट नाम:" }
 }
 
 

@@ -23,13 +23,15 @@ try {
 
 // One-time storage schema migration / hygiene (runs on startup)
 try {
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 3;
   const KNOWN_KEYS = [
     'speechBold','speechColor','monologueColor','monologueBold',
     'sayBold','sayColor','doBold','doColor','mainBold','mainColor',
     'capsEffect','keywordEffects','fontFamily','fontSize','fontWeight',
     'lineHeight','letterSpacing','textAlign','debug','debugFormatting',
     'debugObserver','debugUI','syncEnabled','bgType','bgColor','bgGrad',
+    // UI language override and profiles support
+    'uiLanguage','profiles','activeProfileId','profileBindings',
     'schemaVersion'
   ];
   const pruneUnknown = (obj) => {

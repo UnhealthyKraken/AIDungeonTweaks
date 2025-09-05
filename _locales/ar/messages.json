@@ -64,6 +64,33 @@
   ,"titleResetTextFormatting": { "message": "إعادة تعيين قسم تنسيق النص" }
   ,"titleResetFont": { "message": "إعادة تعيين قسم الخط" }
   ,"titleResetAll": { "message": "إعادة تعيين كل الإعدادات" }
+  ,"groupProfiles": { "message": "الملفات الشخصية" }
+  ,"labelProfile": { "message": "الملف الشخصي" }
+  ,"buttonSaveProfile": { "message": "حفظ كجديد" }
+  ,"buttonDeleteProfile": { "message": "حذف الملف الشخصي" }
+  ,"profileDefault": { "message": "افتراضي" }
+  ,"promptProfileName": { "message": "اسم الملف الشخصي:" }
+  ,"confirmDeleteProfile": { "message": "هل تريد حذف هذا الملف الشخصي؟" }
+  ,"groupExportImport": { "message": "تصدير / استيراد" }
+  ,"labelExportImport": { "message": "نسخ احتياطي أو استعادة الإعدادات" }
+  ,"buttonExport": { "message": "تصدير" }
+  ,"buttonImport": { "message": "استيراد" }
+  ,"colorBlack": { "message": "أسود" }
+  ,"colorBlue": { "message": "أزرق" }
+  ,"colorGreen": { "message": "أخضر" }
+  ,"colorLightBlue": { "message": "أزرق فاتح" }
+  ,"colorPink": { "message": "وردي" }
+  ,"colorRed": { "message": "أحمر" }
+  ,"colorTeal": { "message": "تركوازي" }
+  ,"colorYellow": { "message": "أصفر" }
+  ,"colorWhite": { "message": "أبيض" }
+  ,"buttonRenameProfile": { "message": "إعادة تسمية" }
+  ,"buttonDuplicateProfile": { "message": "تكرار" }
+  ,"labelBinding": { "message": "الربط" }
+  ,"buttonBindToStory": { "message": "ربط بهذه القصة" }
+  ,"buttonUnbindFromStory": { "message": "إلغاء الربط" }
+  ,"promptRenameProfile": { "message": "إعادة تسمية الملف الشخصي:" }
+  ,"promptDuplicateProfile": { "message": "اسم النسخة:" }
 }
 
 

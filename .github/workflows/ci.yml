@@ -1,0 +1,61 @@
+name: Lint and Package (Firefox/Chrome)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install web-ext (for Firefox lint)
+        run: npm i -g web-ext
+
+      - name: Lint (Firefox manifest)
+        run: web-ext lint --source-dir .
+
+      - name: Package (Firefox)
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          FIREFOX_ZIP="aidungeon-tweaks-firefox-$VERSION.zip"
+          zip -r "$FIREFOX_ZIP" . \
+            -x "*.git*" \
+               "*.github*" \
+               "*.DS_Store" \
+               "build-chrome/**"
+
+      - name: Package (Chrome)
+        shell: bash
+        run: |
+          set -e
+          VERSION=$(node -p "require('./manifest.json').version")
+          CHROME_DIR=build-chrome
+          rm -rf "$CHROME_DIR"
+          mkdir "$CHROME_DIR"
+          rsync -a ./ "$CHROME_DIR" --exclude ".git" --exclude ".github" --exclude "$CHROME_DIR"
+          cp "$CHROME_DIR/manifest.chrome.json" "$CHROME_DIR/manifest.json"
+          (cd "$CHROME_DIR" && zip -r "../aidungeon-tweaks-chrome-$VERSION.zip" . \
+            -x "*.git*" "*.github*" "*.DS_Store")
+
+      - name: Upload artifact (Firefox)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-zip
+          path: aidungeon-tweaks-firefox-*.zip
+
+      - name: Upload artifact (Chrome)
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-zip
+          path: aidungeon-tweaks-chrome-*.zip
+
