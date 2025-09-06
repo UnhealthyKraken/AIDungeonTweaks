@@ -202,6 +202,155 @@ document.addEventListener('DOMContentLoaded', function() {
     const importBtn = document.getElementById('importSettings');
     // Extra UX controls for profiles
     let renameProfileBtn, duplicateProfileBtn, bindProfileBtn, unbindProfileBtn;
+
+    // Temporary logging for bind/unbind troubleshooting
+    function logBind() { /* logging disabled */ }
+
+    async function queryAidTabs() {
+        const urls = ['*://*.aidungeon.io/*', '*://aidungeon.io/*', '*://*.aidungeon.com/*', '*://aidungeon.com/*'];
+        let tabs = [];
+        try {
+            if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                tabs = await browser.tabs.query({ url: urls }).catch(() => []);
+            }
+        } catch(_) {}
+        if (!tabs || !tabs.length) {
+            try {
+                if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    tabs = await new Promise((resolve) => { try { chrome.tabs.query({ url: urls }, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                }
+            } catch(_) {}
+        }
+        if (!tabs || !tabs.length) {
+            try {
+                if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                    tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+                }
+            } catch(_) {}
+        }
+        if (!tabs || !tabs.length) {
+            try {
+                if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    tabs = await new Promise((resolve) => { try { chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                }
+            } catch(_) {}
+        }
+        // Final fallback: scan all tabs and filter by hostname
+        if (!tabs || !tabs.length) {
+            try {
+                let allTabs = [];
+                if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                    allTabs = await browser.tabs.query({}).catch(() => []);
+                } else if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    allTabs = await new Promise((resolve) => { try { chrome.tabs.query({}, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                }
+                const matched = (allTabs || []).filter((t) => {
+                    try { const u = new URL(t.url || ''); return /(^|\.)aidungeon\.(io|com)$/i.test(u.hostname); } catch(_) { return false; }
+                });
+                tabs = matched;
+            } catch(_) {}
+        }
+        return tabs || [];
+    }
+
+    async function sendToTabs(message) {
+        const tabs = await queryAidTabs();
+        logBind('sendToTabs: tabs', (tabs || []).map(t => ({ id: t.id, url: t.url })));
+        // If no AID tabs matched (permissions/window focus edge cases), try active tabs in current and all windows
+        const targets = (tabs && tabs.length) ? tabs : await (async () => {
+            try {
+                if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                    const tt = await browser.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+                    return tt || [];
+                }
+            } catch(_) {}
+            try {
+                if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    return await new Promise((resolve) => { try { chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                }
+            } catch(_) {}
+            // Also try active across all windows
+            try {
+                if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                    const tt2 = await browser.tabs.query({ active: true }).catch(() => []);
+                    if (tt2 && tt2.length) return tt2;
+                }
+            } catch(_) {}
+            try {
+                if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    const allActives = await new Promise((resolve) => { try { chrome.tabs.query({ active: true }, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                    if (allActives && allActives.length) return allActives;
+                }
+            } catch(_) {}
+            // Finally, scan all tabs and filter by hostname in-process
+            try {
+                let allTabs = [];
+                if (browser && browser.tabs && typeof browser.tabs.query === 'function') {
+                    allTabs = await browser.tabs.query({}).catch(() => []);
+                } else if (window.chrome && chrome.tabs && typeof chrome.tabs.query === 'function') {
+                    allTabs = await new Promise((resolve) => { try { chrome.tabs.query({}, (tt) => resolve(tt || [])); } catch(_) { resolve([]); } });
+                }
+                return (allTabs || []).filter((t) => {
+                    try { const u = new URL(t.url || ''); return /(^|\.)aidungeon\.(io|com)$/i.test(u.hostname); } catch(_) { return false; }
+                });
+            } catch(_) {}
+            return [];
+        })();
+        logBind('sendToTabs: final targets', (targets || []).map(t => ({ id: t.id, url: t.url })));
+        await Promise.all((targets || []).map(async (t) => {
+            try {
+                if (browser && browser.tabs && typeof browser.tabs.sendMessage === 'function') {
+                    await browser.tabs.sendMessage(t.id, message).catch(() => {});
+                } else if (window.chrome && chrome.tabs && typeof chrome.tabs.sendMessage === 'function') {
+                    await new Promise((resolve) => { try { chrome.tabs.sendMessage(t.id, message, () => resolve()); } catch(_) { resolve(); } });
+                }
+            } catch(_) {}
+        }));
+        // Last resort: broadcast via runtime in case we could not address tabs
+        if (!targets || !targets.length) {
+            try { if (browser && browser.runtime && typeof browser.runtime.sendMessage === 'function') { await browser.runtime.sendMessage(message).catch(() => {}); } } catch(_) {}
+        }
+        return (targets && targets.length) ? targets.length : 0;
+    }
+
+    function setBoundUI(isBound) {
+        try {
+            if (bindProfileBtn) {
+                bindProfileBtn.classList.toggle('is-bound', !!isBound);
+                const label = getMsg('buttonBindToStory') || 'Bind to this story';
+                bindProfileBtn.textContent = isBound ? (label + ' ✓') : label;
+            }
+        } catch(_) {}
+    }
+
+    async function refreshBindingState() {
+        try {
+            const scope = await getCurrentScope();
+            if (!scope) { if (bindProfileBtn) bindProfileBtn.classList.remove('is-bound'); return; }
+            const curr = await browser.storage.local.get(['profileBindings']).catch(() => ({}));
+            const currentId = (curr && curr.profileBindings) ? curr.profileBindings[scope] : '';
+            setBoundUI(!!currentId && currentId === (profileSelect?.value || ''));
+        } catch(_) { try { if (bindProfileBtn) bindProfileBtn.classList.remove('is-bound'); } catch(_) {} }
+    }
+
+    async function updateBindingControls() {
+        try {
+            const scope = await getCurrentScope();
+            const canScope = !!scope;
+            // Temporarily keep buttons enabled for diagnostics; show tooltip if scope missing
+            if (bindProfileBtn) {
+                bindProfileBtn.disabled = false;
+                if (!canScope) setBoundUI(false);
+                bindProfileBtn.title = canScope ? '' : 'Scope not detected yet; click will retry.';
+            }
+            if (unbindProfileBtn) {
+                unbindProfileBtn.disabled = false;
+                unbindProfileBtn.title = canScope ? '' : 'Scope not detected yet; click will retry.';
+            }
+            if (canScope) await refreshBindingState();
+        } catch(_) {}
+    }
+    function setProfilesStatus(_) { /* removed */ }
     // Per-story binding toggle in future could be added; for now, bind current page scope when saving via embedded panel context
     // Background UI visibility helpers
     const bgColorRow = (function(){ try { return bgColorInput ? bgColorInput.closest('.setting-item') : null; } catch(_) { return null; } })();
@@ -281,13 +430,20 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         window.addEventListener('message', (e) => {
             const data = e && e.data;
-            if (!data || data.type !== 'OPEN_CONTROL') return;
-            if (!isEmbeddedPopup) return;
-            try {
-                const extOrigin = (typeof browser !== 'undefined' && browser.runtime) ? new URL(browser.runtime.getURL('/')).origin : null;
-                if (extOrigin && e.origin !== extOrigin) return;
-            } catch(_) {}
-            openControl(data.open);
+            if (!data) return;
+            if (data.type === 'OPEN_CONTROL') {
+                if (!isEmbeddedPopup) return;
+                try {
+                    const extOrigin = (typeof browser !== 'undefined' && browser.runtime) ? new URL(browser.runtime.getURL('/')).origin : null;
+                    if (extOrigin && e.origin !== extOrigin) return;
+                } catch(_) {}
+                openControl(data.open);
+            } else if (data.type === 'SET_SCOPE') {
+                // Receive exact scope from the page when embedded
+                if (isEmbeddedPopup && typeof data.scope === 'string' && data.scope) {
+                    try { localStorage.setItem('aid_scope_hint', data.scope); } catch(_) {}
+                }
+            }
         });
     } catch(_) {}
 
@@ -572,11 +728,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 renameProfileBtn = document.createElement('button');
                 renameProfileBtn.className = 'reset-btn reset-btn--label';
                 renameProfileBtn.textContent = getMsg('buttonRenameProfile') || 'Rename';
-                row.appendChild(renameProfileBtn);
+                // Move under Save as New, next to Duplicate
+                const actionsHost = document.getElementById('profilesActions') || row;
+                actionsHost.appendChild(renameProfileBtn);
                 duplicateProfileBtn = document.createElement('button');
                 duplicateProfileBtn.className = 'reset-btn reset-btn--label';
                 duplicateProfileBtn.textContent = getMsg('buttonDuplicateProfile') || 'Duplicate';
-                row.appendChild(duplicateProfileBtn);
+                actionsHost.appendChild(duplicateProfileBtn);
+                // Attach listeners immediately upon creation
+                try { renameProfileBtn.addEventListener('click', renameProfileFlow); } catch(_) {}
+                try { duplicateProfileBtn.addEventListener('click', duplicateProfileFlow); } catch(_) {}
             }
             const group = row?.parentElement;
             if (group && !bindProfileBtn) {
@@ -598,6 +759,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 wrap.appendChild(unbindProfileBtn);
                 bindRow.appendChild(wrap);
                 group.appendChild(bindRow);
+                // Attach listeners immediately upon creation
+                try { bindProfileBtn.addEventListener('click', bindProfileFlow); } catch(_) {}
+                try { unbindProfileBtn.addEventListener('click', unbindProfileFlow); } catch(_) {}
+                // Initialize control state
+                updateBindingControls();
             }
         } catch(_) {}
     }
@@ -623,8 +789,21 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch(_) {}
         await browser.storage.local.set({ profiles, activeProfileId, profileBindings: bindings }).catch(() => {});
         populateProfiles(profiles, activeProfileId);
-        // Apply immediately
-        try { if (browser.runtime?.sendMessage) browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings: snap, persist: true }); } catch(_) {}
+        
+        // Apply immediately to active AIDungeon tab(s)
+        try {
+            if (browser.tabs && browser.tabs.query) {
+                const sendTo = (tab) => {
+                    if (!tab) return Promise.resolve();
+                    return browser.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings: snap, persist: true }).catch(() => {});
+                };
+                const tryActive = browser.tabs.query({ url: ['*://*.aidungeon.io/*', '*://aidungeon.io/*', '*://*.aidungeon.com/*', '*://aidungeon.com/*'] })
+                    .then((tabsAll) => Promise.all((tabsAll || []).map(t => sendTo(t)))).catch(() => {});
+                await tryActive;
+            } else if (browser.runtime?.sendMessage) {
+                browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings: snap, persist: true }).catch(() => {});
+            }
+        } catch(_) {}
     }
 
     async function deleteProfileFlow() {
@@ -639,10 +818,115 @@ document.addEventListener('DOMContentLoaded', function() {
         const activeProfileId = '';
         await browser.storage.local.set({ profiles, activeProfileId }).catch(() => {});
         populateProfiles(profiles, activeProfileId);
+        
     }
 
-    function getCurrentScopeFromReferrer() {
-        try { return new URL(document.referrer).hostname + (new URL(document.referrer).pathname || '/'); } catch(_) { return ''; }
+    async function getCurrentScope() {
+        try {
+            // First try last known scope written by the content script
+            try {
+                if (browser && browser.storage && browser.storage.local) {
+                    const s = await browser.storage.local.get(['lastKnownScope']).catch(() => ({}));
+                    if (s && typeof s.lastKnownScope === 'string' && s.lastKnownScope) {
+                        logBind('getCurrentScope: using lastKnownScope from storage', s.lastKnownScope);
+                        return s.lastKnownScope;
+                    }
+                }
+            } catch(_) {}
+            // Next try a runtime broadcast (content scripts listen and include scope in reply)
+            try {
+                if (browser && browser.runtime && typeof browser.runtime.sendMessage === 'function') {
+                    const resp = await browser.runtime.sendMessage({ type: 'REQUEST_SETTINGS' }).catch((e) => { logBind('getCurrentScope: REQUEST_SETTINGS broadcast error', e); return null; });
+                    if (resp && resp.scope) {
+                        logBind('getCurrentScope: got scope via broadcast', resp.scope);
+                        return resp.scope;
+                    }
+                }
+            } catch(_) {}
+            // Embedded popup first
+            if (document.documentElement.getAttribute('data-embedded') === '1' && document.referrer) {
+                logBind('getCurrentScope: embedded popup with referrer', document.referrer);
+                try {
+                    const hint = localStorage.getItem('aid_scope_hint');
+                    if (hint) return hint;
+                } catch(_) {}
+                const u = new URL(document.referrer);
+                return u.hostname + (u.pathname || '/');
+            }
+        } catch(_) {}
+        // Fallback to active AIDungeon tab URL
+        try {
+            if (browser.tabs && browser.tabs.query) {
+                // First: try the truly active tab in the last focused browser window (no URL filter)
+                try {
+                    const activeTabs = await browser.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+                    const active = (activeTabs && activeTabs[0]) || null;
+                    logBind('getCurrentScope: active tab (lastFocusedWindow)', active && active.url);
+                    if (active && active.id) {
+                        try {
+                            const resp = await browser.tabs.sendMessage(active.id, { type: 'REQUEST_SCOPE' }).catch((e) => { logBind('getCurrentScope: REQUEST_SCOPE on active tab error', { tabId: active.id, e }); return null; });
+                            if (resp && resp.scope) return resp.scope;
+                            // Fallback to URL parsing even if no response
+                            if (active.url) {
+                                try { const u = new URL(active.url); if (/(^|\.)aidungeon\.(io|com)$/i.test(u.hostname)) return u.hostname + (u.pathname || '/'); } catch(_) {}
+                            }
+                        } catch(_) {}
+                    }
+                } catch(e) { logBind('getCurrentScope: error checking active tab', e); }
+                // Prefer any tab matching AIDungeon URL (popup may be focused window)
+                const tabsAll = await browser.tabs.query({ url: ['*://*.aidungeon.io/*', '*://aidungeon.io/*', '*://*.aidungeon.com/*', '*://aidungeon.com/*'] });
+                logBind('getCurrentScope: matched tabs', (tabsAll || []).map(t => ({ id: t.id, active: !!t.active, url: t.url })));
+                // Ask content script for definitive scope when possible
+                if (tabsAll && tabsAll.length) {
+                    for (const t of tabsAll) {
+                        try {
+                            const resp = await browser.tabs.sendMessage(t.id, { type: 'REQUEST_SCOPE' }).catch((e) => { logBind('getCurrentScope: REQUEST_SCOPE error', { tabId: t.id, e }); return null; });
+                            logBind('getCurrentScope: REQUEST_SCOPE response', { tabId: t.id, resp });
+                            if (resp && resp.scope) return resp.scope;
+                        } catch(_) {}
+                    }
+                    const t = tabsAll[0];
+                    logBind('getCurrentScope: falling back to first tab URL', t && t.url);
+                    if (t && t.url) { const u = new URL(t.url); return u.hostname + (u.pathname || '/'); }
+                }
+                // Extra fallback: active tab in focused/current window, then verify hostname
+                const tryActiveWindow = async (q) => {
+                    try {
+                        const tt = await browser.tabs.query(q).catch(() => []);
+                        const t = (tt && tt[0]) || null;
+                        logBind('getCurrentScope: tryActiveWindow', q, t && t.url);
+                        if (t && t.url) {
+                            try {
+                                const u = new URL(t.url);
+                                if (/(^|\.)aidungeon\.(io|com)$/i.test(u.hostname)) {
+                                    return (u.hostname + (u.pathname || '/'));
+                                }
+                            } catch(_) {}
+                        }
+                    } catch(_) {}
+                    return '';
+                };
+                const lf = await tryActiveWindow({ active: true, lastFocusedWindow: true });
+                if (lf) return lf;
+                const cw = await tryActiveWindow({ active: true, currentWindow: true });
+                if (cw) return cw;
+                // Ultimate fallback: scan all tabs and pick an AIDungeon one (prefer active)
+                try {
+                    const allTabs = await browser.tabs.query({}).catch(() => []);
+                    const aidTabs = (allTabs || []).filter(t => {
+                        try { const u = new URL(t.url || ''); return /(^|\.)aidungeon\.(io|com)$/i.test(u.hostname); } catch(_) { return false; }
+                    });
+                    logBind('getCurrentScope: scanning all tabs, found', aidTabs.map(t => ({ id: t.id, active: !!t.active, url: t.url })));
+                    const preferred = aidTabs.find(t => t.active) || aidTabs[0] || null;
+                    if (preferred && preferred.url) {
+                        const u = new URL(preferred.url);
+                        return u.hostname + (u.pathname || '/');
+                    }
+                } catch(e) { logBind('getCurrentScope: all-tabs fallback error', e); }
+            }
+        } catch(e) { logBind('getCurrentScope: error during tabs lookup', e); }
+        logBind('getCurrentScope: no scope found');
+        return '';
     }
 
     async function renameProfileFlow() {
@@ -657,6 +941,7 @@ document.addEventListener('DOMContentLoaded', function() {
         profiles[id] = Object.assign({}, prof, { name });
         await browser.storage.local.set({ profiles }).catch(() => {});
         populateProfiles(profiles, id);
+        
     }
 
     async function duplicateProfileFlow() {
@@ -672,32 +957,103 @@ document.addEventListener('DOMContentLoaded', function() {
         profiles[newId] = { name, settings: prof.settings };
         await browser.storage.local.set({ profiles, activeProfileId: newId }).catch(() => {});
         populateProfiles(profiles, newId);
+        
     }
 
     async function bindProfileFlow() {
-        const id = profileSelect?.value || '';
-        if (!id) return;
-        const scope = getCurrentScopeFromReferrer();
-        if (!scope) return;
-        const curr = await browser.storage.local.get(['profileBindings']).catch(() => ({}));
+        logBind('bindProfileFlow: click');
+        let id = profileSelect?.value || '';
+        let scope = await getCurrentScope();
+        logBind('bindProfileFlow: scope resolved', scope, 'selectedId', id);
+        // If scope is still missing, force a retry via active tab probe
+        if (!scope && browser.tabs && browser.tabs.query) {
+            try {
+                const activeTabs = await browser.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+                const active = (activeTabs && activeTabs[0]) || null;
+                if (active && active.id) {
+                    const resp = await browser.tabs.sendMessage(active.id, { type: 'REQUEST_SCOPE' }).catch(() => null);
+                    if (resp && resp.scope) scope = resp.scope;
+                }
+            } catch(_) {}
+        }
+        if (!scope) { logBind('bindProfileFlow: abort, no scope'); return; }
+        const curr = await browser.storage.local.get(['profiles','activeProfileId','profileBindings']).catch(() => ({}));
+        let profiles = Object.assign({}, curr.profiles || {});
+        let activeId = curr.activeProfileId || '';
+        if (!id) { id = activeId || ''; }
+        // If still no id, auto-create a profile from current settings so Bind always does something useful
+        if (!id) {
+            const newId = 'p_' + Date.now().toString(36);
+            const name = `Profile ${new Date().toLocaleString()}`;
+            const snap = getCurrentSettingsSnapshot();
+            profiles[newId] = { name, settings: snap };
+            id = newId;
+            activeId = newId;
+            logBind('bindProfileFlow: auto-created profile', { id: newId, name });
+        }
         const bindings = Object.assign({}, curr.profileBindings || {});
         bindings[scope] = id;
-        await browser.storage.local.set({ profileBindings: bindings }).catch(() => {});
+        logBind('bindProfileFlow: saving bindings', { scope, id });
+        await browser.storage.local.set({ profiles, activeProfileId: activeId, profileBindings: bindings }).catch((e) => { logBind('bindProfileFlow: storage.set error', e); });
+        try { populateProfiles(profiles, activeId || id); } catch(_) {}
+        setBoundUI(true);
+        await updateBindingControls();
+        // Apply immediately to active AIDungeon tab(s)
+        try {
+            const prof = profiles[id];
+            const settingsToApply = prof && prof.settings ? prof.settings : null;
+            if (settingsToApply) {
+                logBind('bindProfileFlow: applying to tabs via direct tab messaging');
+                const sent = await sendToTabs({ type: 'UPDATE_SETTINGS', settings: settingsToApply, persist: true });
+                logBind('bindProfileFlow: messages sent to tabs count', sent);
+                // If embedded and no tabs received the message, also notify parent page directly
+                try {
+                    if ((!sent || sent <= 0) && window && window.parent && window.parent !== window) {
+                        logBind('bindProfileFlow: posting UPDATE_SETTINGS to parent window');
+                        window.parent.postMessage({ type: 'UPDATE_SETTINGS', settings: settingsToApply, persist: true }, '*');
+                    }
+                } catch(_) {}
+            }
+        } catch(_) {}
     }
 
     async function unbindProfileFlow() {
-        const scope = getCurrentScopeFromReferrer();
+        logBind('unbindProfileFlow: click');
+        const scope = await getCurrentScope();
+        logBind('unbindProfileFlow: scope resolved', scope);
         if (!scope) return;
-        const curr = await browser.storage.local.get(['profileBindings']).catch(() => ({}));
+        const curr = await browser.storage.local.get(['profileBindings','activeProfileId']).catch(() => ({}));
         const bindings = Object.assign({}, curr.profileBindings || {});
         delete bindings[scope];
-        await browser.storage.local.set({ profileBindings: bindings }).catch(() => {});
+        logBind('unbindProfileFlow: saving bindings', { scope, deleted: true });
+        await browser.storage.local.set({ profileBindings: bindings }).catch((e) => { logBind('unbindProfileFlow: storage.set error', e); });
+        setBoundUI(false);
+        await updateBindingControls();
+        // Re-apply active profile (or defaults) now that binding is removed
+        try {
+            const activeId = curr.activeProfileId || '';
+            let settingsToApply = null;
+            if (activeId) {
+                const res = await browser.storage.local.get(['profiles']).catch(() => ({}));
+                const prof = res && res.profiles ? res.profiles[activeId] : null;
+                if (prof && prof.settings) settingsToApply = prof.settings;
+            }
+            logBind('unbindProfileFlow: applying to tabs via direct tab messaging');
+            const sent = await sendToTabs({ type: 'UPDATE_SETTINGS', settings: settingsToApply || {}, persist: !!settingsToApply });
+            try {
+                if ((!sent || sent <= 0) && window && window.parent && window.parent !== window) {
+                    logBind('unbindProfileFlow: posting UPDATE_SETTINGS to parent window');
+                    window.parent.postMessage({ type: 'UPDATE_SETTINGS', settings: settingsToApply || {}, persist: !!settingsToApply }, '*');
+                }
+            } catch(_) {}
+        } catch(_) {}
     }
 
     async function applyProfileSelection() {
         const id = profileSelect?.value || '';
         if (!browser?.storage?.local) return;
         await browser.storage.local.set({ activeProfileId: id }).catch(() => {});
+        updateBindingControls();
         if (!id) return; // Default (no override)
         const current = await browser.storage.local.get(['profiles']).catch(() => ({}));
         const prof = current?.profiles?.[id];
@@ -928,51 +1284,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 saveTimer = setTimeout(doWrite, settings.syncEnabled ? 600 : 200);
             } catch(_) {}
             
-            // Prefer tabs messaging when available; otherwise fall back to runtime.sendMessage
+            // Prefer tabs messaging to AIDungeon tabs only to avoid console errors from non-receivers
             try {
                 if (browser.tabs && browser.tabs.query) {
-                    // First, try the tab that was active in the last focused window (the page window)
-                    browser.tabs.query({ active: true, lastFocusedWindow: true }).then((tabsLf) => {
-                        const candidate = (tabsLf && tabsLf[0]) || null;
-                        const sendTo = (tab) => {
-                            if (!tab) return Promise.resolve();
-                            return browser.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {});
-                        };
-                        const tryCurrent = () => browser.tabs.query({ active: true, currentWindow: true }).then((tabsCw) => sendTo((tabsCw && tabsCw[0]) || null)).catch(() => {});
-                        const p = candidate ? sendTo(candidate).catch(() => tryCurrent()) : tryCurrent();
-                        p.finally(() => {
-                            // Also broadcast to all AIDungeon tabs in case targeting misses while popup focused
-                            try {
-                                browser.tabs.query({ url: ['*://*.aidungeon.io/*', '*://aidungeon.io/*', '*://*.aidungeon.com/*', '*://aidungeon.com/*'] }).then((tabsAll) => {
-                                    (tabsAll || []).forEach((t) => {
-                                        try { browser.tabs.sendMessage(t.id, { type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {}); } catch(_) {}
-                                    });
-                                }).catch(() => {});
-                            } catch(_) {}
-                            // If UI language changed, reload popup strings
-                            try {
-                                if (langSelect) {
-                                    const preferred = settings.uiLanguage || '';
-                                    localStorage.setItem('aid_ui_lang', preferred);
-                                    // Load messages for selected override
-                                    if (typeof preferred === 'string' && preferred) { loadOverride(preferred); }
-                                    else { loadOverride(''); }
-                                }
-                            } catch(_) {}
+                    browser.tabs.query({ url: ['*://*.aidungeon.io/*', '*://aidungeon.io/*', '*://*.aidungeon.com/*', '*://aidungeon.com/*'] }).then((tabsAll) => {
+                        (tabsAll || []).forEach((t) => {
+                            try { browser.tabs.sendMessage(t.id, { type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {}); } catch(_) {}
                         });
-                    }).catch(() => {
-                        if (browser.runtime && browser.runtime.sendMessage) {
-                            browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {});
-                        }
-                    });
+                    }).catch(() => {});
                 } else if (browser.runtime && browser.runtime.sendMessage) {
                     browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {});
                 }
-            } catch (_) {
-                if (browser.runtime && browser.runtime.sendMessage) {
-                    browser.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings, persist: true }).catch(() => {});
-                }
-            }
+                // If UI language changed, reload popup strings
+                try {
+                    if (langSelect) {
+                        const preferred = settings.uiLanguage || '';
+                        localStorage.setItem('aid_ui_lang', preferred);
+                        if (typeof preferred === 'string' && preferred) { loadOverride(preferred); }
+                        else { loadOverride(''); }
+                    }
+                } catch(_) {}
+            } catch (_) {}
         }
 
         // Always bridge to parent page if embedded in iframe
@@ -1542,6 +1874,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (profileSelect) profileSelect.addEventListener('change', applyProfileSelection);
     if (saveProfileBtn) saveProfileBtn.addEventListener('click', saveProfileFlow);
     if (deleteProfileBtn) deleteProfileBtn.addEventListener('click', deleteProfileFlow);
+    // Attach listeners immediately if buttons already exist; also set during creation in populateProfiles
     if (renameProfileBtn) renameProfileBtn.addEventListener('click', renameProfileFlow);
     if (duplicateProfileBtn) duplicateProfileBtn.addEventListener('click', duplicateProfileFlow);
     if (bindProfileBtn) bindProfileBtn.addEventListener('click', bindProfileFlow);

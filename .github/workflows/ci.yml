@@ -3,7 +3,13 @@ name: Lint and Package (Firefox/Chrome)
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -32,7 +38,8 @@ jobs:
             -x "*.git*" \
                "*.github*" \
                "*.DS_Store" \
-               "build-chrome/**"
+               "build-chrome/**" \
+               "manifest.chrome.json"
 
       - name: Package (Chrome)
         shell: bash
@@ -44,6 +51,7 @@ jobs:
           mkdir "$CHROME_DIR"
           rsync -a ./ "$CHROME_DIR" --exclude ".git" --exclude ".github" --exclude "$CHROME_DIR"
           cp "$CHROME_DIR/manifest.chrome.json" "$CHROME_DIR/manifest.json"
+          rm -f "$CHROME_DIR/manifest.chrome.json"
           (cd "$CHROME_DIR" && zip -r "../aidungeon-tweaks-chrome-$VERSION.zip" . \
             -x "*.git*" "*.github*" "*.DS_Store")
 
@@ -58,4 +66,12 @@ jobs:
         with:
           name: chrome-zip
           path: aidungeon-tweaks-chrome-*.zip
+
+      - name: Create GitHub Release and upload zips
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            aidungeon-tweaks-firefox-*.zip
+            aidungeon-tweaks-chrome-*.zip
 

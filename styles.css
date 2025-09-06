@@ -1,4 +1,5 @@
 /* AI Dungeon Tweaks - Styles */
+html, body { margin: 0; padding: 0; }
 #transition-opacity .ai-caps-effect { display: inline-block; }
 /* Flash */
 .ai-caps-flash { animation: aiFlash 0.8s linear infinite; }
@@ -280,6 +281,16 @@
 #popup-root .setting-item--keyword [data-remove] { grid-column: 5; justify-self: end; }
 /* Ensure keyword remove button is to the far right, overriding generic reset placement */
 #popup-root .setting-item.setting-item--keyword .reset-btn[data-remove] { grid-column: 5 !important; justify-self: end; }
+#popup-root #profilesActionsRow .profiles-actions {
+    grid-column: 2 / 4; /* span the two control columns */
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+#popup-root #profilesActionsRow .profiles-actions .reset-btn {
+    min-width: 110px; /* make buttons consistent */
+}
 #popup-root .toggle-switch {
     position: relative;
     display: inline-block;
@@ -491,6 +502,8 @@ em.ai-italic-speech,
     border: 0;
     background: transparent;
     border-radius: 12px; /* rounded iframe so the UI corners match */
+    /* remove default iframe margins so panel centers visually */
+    margin: 0;
 }
 
 
@@ -504,6 +517,8 @@ em.ai-italic-speech,
 html[data-embedded="1"] #popup-root {
     background: #535967 !important; /* exact solid container */
     backdrop-filter: none !important;
+    /* Visually balance left/right border by nudging container 2px left */
+    margin-left: -2px;
 }
 html[data-embedded="1"] #popup-root .setting-group {
     background: #2F3645 !important; /* exact solid color */

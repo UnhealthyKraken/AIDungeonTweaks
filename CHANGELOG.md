@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3 – 2025-09-06
+- Fixed: Profile bind/unbind reliably detects story scope (beta domain supported); immediate apply to page; auto-apply on reload.
+- Fixed: Export/Import robustness and sanitization; safer writes and reload of settings.
+- Fixed: In-game menu integration orientation/placement so the settings button aligns with the existing menu.
+
 ## 1.2 – 2025-09-05
 - Cross-browser: added Chrome MV3 manifest (service_worker). Bumped version to 1.2.
 - Profiles: per-story bindings (host+path) auto-apply; Profiles UI: bind/unbind, rename, duplicate.

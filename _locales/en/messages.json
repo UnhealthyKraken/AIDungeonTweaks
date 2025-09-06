@@ -91,6 +91,12 @@
   ,"buttonUnbindFromStory": { "message": "Unbind" }
   ,"promptRenameProfile": { "message": "Rename profile:" }
   ,"promptDuplicateProfile": { "message": "Duplicate name:" }
+  ,"statusProfileSaved": { "message": "Profile saved" }
+  ,"statusProfileDeleted": { "message": "Profile deleted" }
+  ,"statusProfileRenamed": { "message": "Profile renamed" }
+  ,"statusProfileDuplicated": { "message": "Profile duplicated" }
+  ,"statusBound": { "message": "Bound to this story" }
+  ,"statusUnbound": { "message": "Unbound from this story" }
 }
 
 

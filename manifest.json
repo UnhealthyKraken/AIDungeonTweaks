@@ -12,14 +12,16 @@
   ],
   "host_permissions": [
     "*://*.aidungeon.io/*",
-    "*://*.aidungeon.com/*"
+    "*://*.aidungeon.com/*",
+    "*://beta.aidungeon.com/*"
   ],
   
   "content_scripts": [
     {
       "matches": [
         "*://*.aidungeon.io/*",
-        "*://*.aidungeon.com/*"
+        "*://*.aidungeon.com/*",
+        "*://beta.aidungeon.com/*"
       ],
       "js": ["content.js"],
       "css": ["styles.css"],

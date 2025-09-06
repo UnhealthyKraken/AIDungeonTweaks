@@ -1198,6 +1198,8 @@
             if (typeof browser !== 'undefined' && browser.storage && browser.storage.local) {
                 const scope = (function(){ try { return location.hostname + (location.pathname || '/'); } catch(_) { return ''; } })();
                 if (scope) {
+                    // Persist lastKnownScope so popup can read it even if messaging is blocked by window focus
+                    try { browser.storage.local.set({ lastKnownScope: scope }).catch(() => {}); } catch(_) {}
                     browser.storage.local.get(['profiles','profileBindings','activeProfileId']).then((res) => {
                         try {
                             const profiles = res && res.profiles || {};

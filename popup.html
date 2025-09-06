@@ -359,10 +359,11 @@
                 <select id="profileSelect"></select>
                 <button class="reset-btn reset-btn--label" id="saveProfile" data-i18n="buttonSaveProfile">Save as New</button>
             </div>
-            <div class="setting-item">
+            <div class="setting-item" id="profilesActionsRow">
                 <label></label>
-                <div></div>
-                <button class="reset-btn reset-btn--label" id="deleteProfile" data-i18n="buttonDeleteProfile">Delete Profile</button>
+                <div id="profilesActions" class="profiles-actions">
+                    <button class="reset-btn reset-btn--label profiles-delete-btn" id="deleteProfile" data-i18n="buttonDeleteProfile">Delete Profile</button>
+                </div>
             </div>
         </details>
         <details class="setting-group" open>
