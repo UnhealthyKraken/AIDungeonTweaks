@@ -1983,7 +1983,7 @@
                     iconContainer.appendChild(iconSpan);
                     const textSpan = document.createElement('span');
                     textSpan.className = exitTextSpan ? exitTextSpan.className : 'is_ButtonText font_body';
-                    textSpan.textContent = 'Formatter Settings';
+                    textSpan.textContent = 'AI Dungeon Tweaks';
                     textSpan.setAttribute('aria-hidden', 'true');
                     btn.appendChild(iconContainer);
                     btn.appendChild(textSpan);
