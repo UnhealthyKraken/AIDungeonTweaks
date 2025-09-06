@@ -43,7 +43,9 @@ A browser extension for Firefox and Chrome that improves how **AI Dungeon** text
 - Per-keyword styling with effects: `none`, `flash`, `strobe`, `rainbow`, `wave`, `breathe`, `static`.
 - Optional per-keyword bold.
 - Apply the same effects to ALL-CAPS words.
+
 ![Textformatting tab](docs/textformatting3.png)
+
 ![Textformatting tab](docs/textformatting2.png)
 
 ### Typography
@@ -58,7 +60,12 @@ A browser extension for Firefox and Chrome that improves how **AI Dungeon** text
 ![Miscellaneous tab](docs/misc1.png)
 - Options: `inherit`, `solid`, or `gradient`.
 - Solid colour picker and CSS gradient input.
+
+![Miscellaneous tab](docs/misc2.png)
+
 - Quick-apply recent colours and custom swatches.
+
+![Miscellaneous tab](docs/misc3.png)
 
 ### Settings & Sync
 
