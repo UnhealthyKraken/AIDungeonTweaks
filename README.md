@@ -2,6 +2,9 @@
 
 A browser extension for Firefox and Chrome that improves how **AI Dungeon** text is displayed. It automatically converts AI Dungeon’s inline formatting (like `*italics*` or `**bold**`) into properly styled content and adds customisation features for story text.
 
+
+![Miscellaneous tab](docs/main1.png)
+
 ---
 
 ## ✨ Features
@@ -33,7 +36,7 @@ A browser extension for Firefox and Chrome that improves how **AI Dungeon** text
   - Say (`sayBold`, `sayColor`)
   - Do (`doBold`, `doColor`)
   - Main text (`mainBold`, `mainColor`)
-  - 
+
 ![Actions tab](docs/actions2.png)
 
 
