@@ -1,166 +1,130 @@
-# AI Dungeon Tweaks - Browser Extension (Firefox & Chrome)
+# AI Dungeon Tweaks – Browser Extension (Firefox & Chrome)
 
-This Firefox browser extension tweaks and formats AI Dungeon story text to properly display asterisk‑wrapped text as italicized content.
+A browser extension for Firefox and Chrome that improves how **AI Dungeon** text is displayed. It automatically converts AI Dungeon’s inline formatting (like `*italics*` or `**bold**`) into properly styled content and adds customisation features for story text.
 
-## What it does
+---
 
-When the AI in AIDungeon uses text formatting, this extension automatically converts it to properly styled content instead of showing the literal formatting characters.
+## ✨ Features
 
-## Supported Formats
+### Text Formatting
+- Converts:
+  - `*text*` / `_text_` → *italic*
+  - `**text**` / `__text__` → **bold**
+  - `~~text~~` → ~~strikethrough~~
+  - `` `text` `` → `inline code`
+  - `^^text^^` / `==text==` → ==highlight==
+- Auto-closes unbalanced italics and quotation marks.
+- Preserves valid HTML to avoid double formatting.
 
-- `*text*` or `_text_` → *italic text*
-- `**text**` or `__text__` → **bold text**
-- `~~text~~` → ~~strikethrough text~~
-- `` `text` `` → `inline code`
-- `^^text^^` or `==text==` → ==highlighted text==
+### Speech & Monologue
+- **Speech:** `"text"` → styled speech.  
+  Configurable: bold (`speechBold`), colour (`speechColor`).
+- **Monologue:** `*"text"*` → italicised speech.  
+  Configurable: bold (`monologueBold`), colour (`monologueColor`).
+- Remembers monologues per tab to prevent re-formatting.
 
-## Features
+### Action Rows
+- Detects AI Dungeon action rows (`w_comment`, `w_run`).
+- Configurable styles for:
+  - Say (`sayBold`, `sayColor`)
+  - Do (`doBold`, `doColor`)
+  - Main text (`mainBold`, `mainColor`)
 
-- Text formatting engine
-  - Converts `*italic*`, `_italic_`, `**bold**`, `__bold__`, `~~strike~~`, `` `code` ``, and `^^/== highlight ==` into styled HTML.
-  - Preserves existing valid HTML and avoids double-formatting.
-  - Auto-closes unbalanced single-asterisk italics at the end of a line.
+### Keyword & CAPS Effects
+- Per-keyword styling with effects: `none`, `flash`, `strobe`, `rainbow`, `wave`, `breathe`, `static`.
+- Optional per-keyword bold.
+- Apply the same effects to ALL-CAPS words.
 
-- Speech and monologue detection
-  - Speech: plain quotes like "text" are styled as speech; configurable bold (`speechBold`) and color (`speechColor`). Quotes are preserved.
-  - Monologue: `*"text"*` (or `*"text"`) becomes italic speech with optional bold (`monologueBold`) and color (`monologueColor`).
-  - Remembers monologue contents per tab to prevent reformatting on rerenders.
+### Typography
+- Controls for `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `letterSpacing`, `textAlign`.
+- Includes system fonts and Google Fonts (`g:Inter`, etc.).
+- Normalises spacing across story rows.
 
-- Action row styling
-  - Detects AIDungeon action rows (e.g., `w_comment` and `w_run`).
-  - Separate toggles for Say (`sayBold`, `sayColor`), Do (`doBold`, `doColor`), and Main text (`mainBold`, `mainColor`).
+### Backgrounds
+- Options: `inherit`, `solid`, or `gradient`.
+- Solid colour picker and CSS gradient input.
+- Quick-apply recent colours and custom swatches.
 
-- Keyword effects
-  - Per-keyword styling with effects: `none`, `flash`, `strobe`, `rainbow`, `wave`, `breathe`, or `static` color.
-  - Optional per-keyword bold.
-  - Safe UI: keywords are rendered with DOM APIs (no `innerHTML` for user text).
+### Settings & Sync
+- In-page settings panel (opens from toolbar of from the AI Dungeon Game button above "Exit Game").
+- Section resets and global “Reset All”.
+- Syncs via `browser.storage.sync` (falls back to local).
 
-- ALL‑CAPS effects
-  - Apply a visual effect to ALL‑CAPS sequences via `capsEffect` (same effect options as keywords).
+### Debug & Storage Hygiene
+- Debug toggles: `debug`, `debugFormatting`, `debugObserver`, `debugUI`.
+- Tracks `schemaVersion` and prunes unknown keys on startup.
 
-- Typography controls
-  - `fontFamily` (includes common system families and Google fonts like `g:Inter`).
-  - `fontSize`, `fontWeight`, `lineHeight`, `letterSpacing`, `textAlign`.
-  - Applies consistently to story rows; normalizes spacing based on line height.
+---
 
-- Background customization
-  - `bgType`: `inherit`, `solid`, or `gradient`.
-  - Solid color picker (`bgColor`) and CSS gradient input (`bgGrad`).
-  - Recent color swatches with quick apply; custom color options in selects.
+## 🛠 Installation
 
-- Settings UI and sync
-  - Toolbar click opens an embedded in‑page settings panel for a seamless on‑site experience.
-  - Per‑section reset buttons and a global “Reset All”.
-  - Optional sync: when enabled, settings are written to `browser.storage.sync` (falls back to local).
+### Firefox
+**Temporary (testing):**
+1. Go to `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…**.
+3. Select this folder’s `manifest.json`.
 
-- Debug options
-  - `debug`, `debugFormatting`, `debugObserver`, `debugUI` toggles to help diagnose behavior.
+**From file:**
+1. Download the Firefox `.zip` from [Releases](https://github.com/UnhealthyKraken/AIDungeonTweaks/releases).
+2. (Optional) Rename `.zip` → `.xpi`.
+3. In `about:config`, set `xpinstall.signatures.required` → `false` (Dev/Nightly only).
+4. Go to `about:addons` → ⚙ → **Install Add-on From File…**.
+5. Select the `.xpi` / `.zip`.
 
-- Storage hygiene (internal)
-  - Maintains a `schemaVersion` and prunes unknown keys on startup to keep storage clean.
+### Chrome / Edge
+**Temporary (testing):**
+1. Open `chrome://extensions` or `edge://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select the folder (ensure `manifest.chrome.json` is renamed to `manifest.json`).
 
-## Installation
+**From zip:**
+1. Download the Chrome `.zip` from [Releases](https://github.com/UnhealthyKraken/AIDungeonTweaks/releases).
+2. Extract the zip.
+3. In Extensions, enable Developer mode → **Load unpacked** → select the extracted folder.
 
-### Firefox (temporary install for testing)
-1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
-2. Click "Load Temporary Add-on..."
-3. Select this folder's `manifest.json` (the Firefox manifest)
-4. The extension installs temporarily and works until you restart Firefox
+---
 
-### Firefox (packaging / permanent)
-To publish permanently, package and submit to AMO (addons.mozilla.org). For local permanent installs, Firefox restricts unsigned add-ons unless using Developer Edition with the signing requirement disabled.
+## ⚙️ How It Works
+- Targets AI Dungeon’s `transition-opacity` element.
+- Uses `MutationObserver` to detect and reformat text changes.
+- Converts formatting live while preserving site styling.
+- Works across themes and dynamic content.
 
-### Chrome/Edge (temporary install for testing)
-1. Open `chrome://extensions` (or `edge://extensions`) and enable Developer mode
-2. Click "Load unpacked"
-3. Select this folder after copying/renaming `manifest.chrome.json` to `manifest.json`, or point to the folder with a symlinked manifest
+---
 
-### Chrome/Edge (packaging)
-Zip the folder with `manifest.json` set to the Chrome manifest (service worker). Upload to the Chrome Web Store (or Edge Add-ons) following their publishing guidelines.
+## 🌍 Localization
+- Default: English (`en`).
+- Included machine-generated translations: `es`, `de`, `fr`, `pt_BR`, `ru`, `zh_CN`, `hi`, `ar`, `ja`, `ko`, `it`, `tr`, `id`.
+- Contributions welcome: edit `_locales/<lang>/messages.json`.
 
-## How it works
+Settings UI supports language override (default: auto-detect from browser).
 
-The extension:
-- Targets the specific element with ID `transition-opacity` on AI Dungeon pages
-- Monitors for text changes using MutationObserver
-- Automatically converts various formatting patterns to proper HTML elements
-        - Preserves all original styling while adding appropriate formatting
-        - Works with all themes
-        - Handles dynamic content updates in real-time
-- Supports multiple formatting styles: italic, bold, strikethrough, inline code, and highlighting
+---
 
-## Files
+## 📜 Changelog
+See [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
-- `manifest.json` - MV3 configuration (Firefox uses `background.scripts`)
-- `manifest.chrome.json` - MV3 configuration for Chrome/Edge (uses `background.service_worker`)
-- `background.js` - Action click handler and storage hygiene
-- `content.js` - Formatting logic injected into AI Dungeon pages
-- `popup.html` / `popup.js` / `styles.css` - Settings UI (toolbar or embedded)
-- `README.md` - This documentation file
- - `_locales/` - Translatable strings for i18n (default: `en`)
+---
 
-## Permissions
+## ❓ Troubleshooting
+- Ensure you’re on an AI Dungeon page.
+- Check Browser Console (`Ctrl+Shift+J` or `F12`) for errors.
+- Refresh the page.
+- Confirm extension is enabled.
 
-The extension requires:
-- `tabs` and `storage`
-- Host permissions: `*://*.aidungeon.io/*` and `*://*.aidungeon.com/*`
+Note: If you see `background.service_worker is disabled`, this repo already uses `background.scripts` for Firefox MV3.
 
-## Compatibility
+---
 
-- Firefox 109+ (MV3)
-- AI Dungeon domains: `aidungeon.io` and `aidungeon.com`
-- Works with light/dark themes; responsive UI
+## 🔒 Security & CSP
+- No remote script injection.
+- Fonts loaded via `<link>` if `g:` font selected.
+- If a site blocks external stylesheets, system fonts are used instead.
 
-## Localization (i18n)
+---
 
-- Default locale: `en` (English). Manifest strings and the settings UI support localization.
-- Included locales (AI‑translated initial drafts): `es`, `de`, `fr`, `pt_BR`, `ru`, `zh_CN`, `hi`, `ar`, `ja`, `ko`, `it`, `tr`, `id`.
-- These translations were machine‑generated and may contain inaccuracies. Native speakers are welcome to improve them by editing the files under `_locales/<lang>/messages.json`.
-
-### Language selector
-
-- The settings UI includes a Language section to preview/select a UI language override. By default, it follows the browser language (Auto). The override only affects the extension UI.
-
-## Changelog
-
-See `CHANGELOG.md` for version history and notable changes.
-
-## Troubleshooting
-
-If the extension doesn't work:
-1. Make sure you're on an AIDungeon page
-2. Check the Browser Console (Ctrl+Shift+J) for errors
-3. Try refreshing the page
-4. Ensure the extension is enabled in `about:addons`
-
-If you see "background.service_worker is currently disabled", switch the manifest background to `scripts` (this repo already uses `background.scripts` for Firefox MV3).
-
-## Security & CSP
-
-- The extension does not inject remote scripts. Styling and fonts are applied via CSS.
-- Google Fonts are loaded by adding a `<link rel="stylesheet">` when a `g:` font family is selected in settings.
-- If a target site uses a strict Content Security Policy that blocks external stylesheets, web fonts may not load. The extension will continue to function with system fonts.
-
-## Build, Release & Packaging
-
-- Versioning: Update the `version` in `manifest.json` and document changes in `CHANGELOG.md`.
-- Optional build step: simple script to swap manifests before packaging (e.g., `copy manifest.chrome.json manifest.json`).
-
-### GitHub Actions (CI)
-
-This repo includes a GitHub Actions workflow that:
-- Lints the extension using `web-ext` (Firefox)
-- Packages Firefox and Chrome zip artifacts
-
-Artifacts appear in the Actions run as `firefox-zip` and `chrome-zip`.
-
-Trigger: pushes to `main` or any pull request. See `.github/workflows/ci.yml`.
-
-
-## Uninstalling
-
-To remove the extension:
-1. Go to `about:addons`
-2. Find "AI Dungeon Tweaks" in the list
-3. Click the three dots menu and select "Remove"
-4. Confirm the removal
+## 🗑 Uninstalling
+1. Go to `about:addons` / `chrome://extensions`.
+2. Find **AI Dungeon Tweaks**.
+3. Click menu → **Remove**.
+4. Confirm.
