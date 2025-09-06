@@ -18,7 +18,7 @@ A browser extension for Firefox and Chrome that improves how **AI Dungeon** text
 
 ### Speech & Monologue
 
-![Actions tab](docs/images/textformatting4.png)
+![Actions tab](docs/textformatting4.png)
 - **Speech:** `"text"` → styled speech.
   Configurable: bold (`speechBold`), colour (`speechColor`).
 - **Monologue:** `*"text"*` → italicised speech.  
@@ -27,49 +27,49 @@ A browser extension for Firefox and Chrome that improves how **AI Dungeon** text
 
 ### Action Rows
 
-![Actions tab](docs/images/actions1.png)
+![Actions tab](docs/actions1.png)
 - Detects AI Dungeon action rows (`w_comment`, `w_run`).
 - Configurable styles for:
   - Say (`sayBold`, `sayColor`)
   - Do (`doBold`, `doColor`)
   - Main text (`mainBold`, `mainColor`)
   - 
-![Actions tab](docs/images/actions2.png)
+![Actions tab](docs/actions2.png)
 
 
 ### Keyword & CAPS Effects
 
-![Actions tab](docs/images/textformatting5.png)
+![Textformatting tab](docs/textformatting5.png)
 - Per-keyword styling with effects: `none`, `flash`, `strobe`, `rainbow`, `wave`, `breathe`, `static`.
 - Optional per-keyword bold.
 - Apply the same effects to ALL-CAPS words.
-![Actions tab](docs/images/textformatting3.png)
-![Actions tab](docs/images/textformatting2.png)
+![Textformatting tab](docs/textformatting3.png)
+![Textformatting tab](docs/textformatting2.png)
 
 ### Typography
 
-![Actions tab](docs/images/textformattings1.png)
+![Textformatting tab](docs/textformatting1.png)
 - Controls for `fontFamily`, `fontSize`, `fontWeight`, `lineHeight`, `letterSpacing`, `textAlign`.
 - Includes system fonts and Google Fonts (`g:Inter`, etc.).
 - Normalises spacing across story rows.
 
 ### Backgrounds
 
-![Actions tab](docs/images/misc1.png)
+![Miscellaneous tab](docs/misc1.png)
 - Options: `inherit`, `solid`, or `gradient`.
 - Solid colour picker and CSS gradient input.
 - Quick-apply recent colours and custom swatches.
 
 ### Settings & Sync
 
-![Actions tab](docs/images/settings1.png)
+![Settings](docs/settings1.png)
 - In-page settings panel (opens from toolbar of from the AI Dungeon Game button above "Exit Game").
 - Section resets and global “Reset All”.
 - Syncs via `browser.storage.sync` (falls back to local).
 
 ### Debug & Storage Hygiene
 
-![Actions tab](docs/images/debug1.png)
+![Miscellaneous tab](docs/debug1.png)
 - Debug toggles: `debug`, `debugFormatting`, `debugObserver`, `debugUI`.
 - Tracks `schemaVersion` and prunes unknown keys on startup.
 
