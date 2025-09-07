@@ -4,6 +4,8 @@ A userscript (Tampermonkey/Violentmonkey) that improves how **AI Dungeon** text 
 
 ➡️ [Skip to Installation](#installation-userscript)
 
+[![Install userscript](https://img.shields.io/badge/Install-Userscript-blue)](https://raw.githubusercontent.com/UnhealthyKraken/AIDungeonTweaks/main/ai-dungeon-tweaks.user.js)
+
 Note: This project is unaffiliated with and not endorsed by AI Dungeon or Latitude.
 
 

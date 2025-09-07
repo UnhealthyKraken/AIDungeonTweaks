@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.0
+// @version      1.4.5
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -31,7 +31,7 @@
     // regex feature toggles
     rBold: true, rItalic: true, rSpeechWeight: true, rStrike: true, rCode: true, rHighlight: true, rColour: true,
 
-    // Actions (used for “You say …”/comment blocks; Do kept for later use)
+    // Actions (used for "You say ..."/comment blocks; Do kept for later use)
     actions: { do: { bold: false, colour: '#ffffff' }, say: { bold: false, colour: '#ffffff' } },
 
     // Text Formatting (global)
@@ -44,6 +44,7 @@
     textAlign: 'default',
 
     internalMonologue: { bold: false, colour: '#9ca3af' }, // *"..."*
+    italics:           { bold: false, colour: '#facc15' }, // *text* (unquoted)
     speech:            { bold: false, colour: '#ffffff' }, // "..."
 
     textFormatting: { keywords: [], mainText: { bold: false, colour: '#ffffff' } },
@@ -71,7 +72,7 @@
     'en-US': {
       'Actions':'Actions','Text Formatting':'Text Formatting','Miscellaneous':'Miscellaneous',
       'Do':'Do','Say':'Say','Bold':'Bold','Colour':'Color','Effect':'Effect',
-      'Main Text':'Main Text','Speech':'Speech','Internal Monologue':'Internal Monologue','Keywords':'Keywords','Add Keyword':'Add Keyword',
+      'Main Text':'Main Text','Speech':'Speech','Internal Monologue':'Internal Monologue','Italics':'Italics','Keywords':'Keywords','Add Keyword':'Add Keyword',
       'All Caps Effects':'All Caps Effects','Font':'Font','Font Family':'Font Family','Font Size':'Font Size','Font Weight':'Font Weight','Line Height':'Line Height','Letter Spacing':'Letter Spacing','Text Alignment':'Text Alignment','Reset Font':'Reset Font',
       'Reset Text Formatting':'Reset Text Formatting','Background':'Background','Background type':'Background type','Background colour':'Background color','Backdrop opacity':'Backdrop opacity',
       'Language':'Language','Language override':'Language override','Profiles':'Profiles','Profile':'Profile','Save as new':'Save as new','Rename':'Rename','Duplicate':'Duplicate','Delete':'Delete','Bind to this story':'Bind to this story','Unbind':'Unbind',
@@ -97,8 +98,8 @@
       'Do':'Faire','Say':'Dire','Bold':'Gras','Colour':'Couleur','Effect':'Effet',
       'Main Text':'Texte principal','Speech':'Dialogue','Internal Monologue':'Monologue interne','Keywords':'Mots-clés','Add Keyword':'Ajouter un mot-clé',
       'All Caps Effects':'Effets MAJUSCULES','Font':'Police','Font Family':'Famille de polices','Font Size':'Taille de police','Font Weight':'Graisse','Line Height':'Interligne','Letter Spacing':'Espacement des lettres','Text Alignment':'Alignement du texte','Reset Font':'Réinitialiser la police',
-      'Reset Text Formatting':'Réinitialiser la mise en forme','Background':'Arrière-plan','Background type':'Type d’arrière-plan','Background colour':'Couleur d’arrière-plan','Backdrop opacity':'Opacité du fond',
-      'Language':'Langue','Language override':'Langue de l’interface','Profiles':'Profils','Profile':'Profil','Save as new':'Enregistrer comme nouveau','Rename':'Renommer','Duplicate':'Dupliquer','Delete':'Supprimer','Bind to this story':'Lier à cette histoire','Unbind':'Délier',
+      'Reset Text Formatting':'Réinitialiser la mise en forme','Background':'Arrière-plan','Background type':'Type d\'arrière-plan','Background colour':'Couleur d\'arrière-plan','Backdrop opacity':'Opacité du fond',
+      'Language':'Langue','Language override':'Langue de l\'interface','Profiles':'Profils','Profile':'Profil','Save as new':'Enregistrer comme nouveau','Rename':'Renommer','Duplicate':'Dupliquer','Delete':'Supprimer','Bind to this story':'Lier à cette histoire','Unbind':'Délier',
       'Export':'Exporter','Import':'Importer','Reset All':'Tout réinitialiser','Default':'Par défaut','Backdrop (behind overlays)':'Fond (derrière les superpositions)','Solid (override overlays)':'Solide (remplace les superpositions)',
       'Reset':'Réinitialiser','Add':'Ajouter','Enable':'Activer','Disable':'Désactiver'
     },
@@ -218,9 +219,12 @@
   const saveJSON = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
   const debounce  = (fn, ms)=>{ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; };
 
-  // Debug helpers (disabled/no-op)
+  // Debug helpers disabled in production build
+  const __aidt_isDebugEnabled = ()=>false;
   const dbg  = ()=>{};
   const dbgw = ()=>{};
+  function __aidt_debugMarkLatest(){ }
+  function __aidt_debugDumpLatest(){ }
 
   // Ensure Default exists
   let profiles = loadJSON(LS_PROFILES, {profiles:{}});
@@ -244,8 +248,37 @@
   // Script version (for UI title)
   const SCRIPT_VERSION = (function(){ try{ return (typeof GM_info!=='undefined' && GM_info && GM_info.script && GM_info.script.version) || ''; }catch(_){ return ''; } })();
 
+  // Preset colors used by dropdowns
+  const COLOR_PRESETS = [
+    { name:'White',        value:'#ffffff' },
+    { name:'Silver',       value:'#cbd5e1' },
+    { name:'Gray',         value:'#9ca3af' },
+    { name:'Slate',        value:'#64748b' },
+    { name:'Gold',         value:'#facc15' },
+    { name:'Yellow',       value:'#d2ed3f' },
+    { name:'Amber',        value:'#f59e0b' },
+    { name:'Orange',       value:'#fb923c' },
+    { name:'Peach',        value:'#fed7aa' },
+    { name:'Coral',        value:'#fb7185' },
+    { name:'Red',          value:'#ef4444' },
+    { name:'Rose',         value:'#f43f5e' },
+    { name:'Pink',         value:'#ec4899' },
+    { name:'Lavender',     value:'#a78bfa' },
+    { name:'Purple',       value:'#8b5cf6' },
+    { name:'Light Blue',   value:'#93c5fd' },
+    { name:'Sky Blue',     value:'#38bdf8' },
+    { name:'Blue',         value:'#60a5fa' },
+    { name:'Aqua',         value:'#7dd3fc' },
+    { name:'Cyan',         value:'#22d3ee' },
+    { name:'Mint',         value:'#99f6e4' },
+    { name:'Teal',         value:'#2dd4bf' },
+    { name:'Lime',         value:'#84cc16' },
+    { name:'Green',        value:'#10b981' }
+  ];
+
   // ---------------- Containers (single source of truth) ----------------
   const KNOWN_CONTAINERS = [
+    '#do-not-copy',
     '#transition-opacity',
     '#gameplay-output',
     '[data-testid="adventure-text"]',
@@ -256,13 +289,14 @@
     'span.font_heading',
     'span.font_gameplay', 'p.font_gameplay', 'div.font_gameplay',
     // AI Dungeon specific wrappers for the newest paragraph
+    '#gameplay-output #do-not-copy',
     '#gameplay-output #transition-opacity',
     '#gameplay-output span._blw-0hover-0px',
     'span._blw-0hover-0px',
     '.w_comment', '.w-comment',              // SAY/comment blocks
     'main [class*="prose"]',
     'article',
-    'blockquote'                              // catch “You say …” layouts
+    'blockquote'                              // catch "You say ..." layouts
   ];
   const getRoots = ()=>{
     const set=new Set();
@@ -306,20 +340,34 @@
   };
 
   // ---------------- Regex rules ----------------
-  const reBoldAsterisk   = /\*\*(?=\S)([^*]*?\S)\*\*/g;
-  const reBoldUnderscore = /__(?=\S)([^_]*?\S)__/g;
-  const reItalAsterisk   = /\*(?=\S)([^*]*?\S)\*/g;
-  const reItalUnderscore = /_(?=\S)([^_]*?\S)_/g;
+  // Constrain inline markers to a single line to avoid cross-paragraph captures
+  const reBoldAsterisk   = /\*\*(?=\S)([^\n*]*?\S)\*\*/g;
+  const reBoldUnderscore = /__(?=\S)([^\n_]*?\S)__/g;
+  const reItalAsterisk   = /\*(?=\S)([^\n*]*?\S)\*/g;
+  const reItalUnderscore = /_(?=\S)([^\n_]*?\S)_/g;
 
-  const reItalicSpeech = /\*(?:"|“)([\s\S]*?)(?:"|”)\*/g; // *"..."* or *“...”*  (Internal Monologue)
+  // IM marked by *"..."* (straight quotes only to avoid interference with regular italics)
+  // Only treat IM when the asterisk is directly adjacent to the opening quote (no trailing text before it)
+  const reItalicSpeech = /(?:^|\s)\*"([^\n]*?)"\*(?=$|\s)/g;
+  // Open-only/cut-off normalization helpers
+  // Important: do not allow newline between * and opening quote, or before trailing *
+  // Require leading boundary before * so a trailing * from italics doesn't pair with a following speech quote
+  const reIMOpenOnlyClose      = /(?:^|[^\S\r\n])\*\s*"([^\n]*?)"(?![^\S\r\n]*\*)/g;      // *"..." → *"..."*
+  const reItalOpenOnlyAsterisk = /\*(?=\S)([^*\n]+?)(?=$|\n)/g;                     // *text → *text*
+  const reItalOpenOnlyUnders   = /_(?=\S)([^_\n]+?)(?=$|\n)/g;                       // _text → _text_
+  // Line-level IM: asterisks that wrap a sentence on its own line (no quotes)
+  const reIMLineAsterisk = /(^|\n)\*\s*([^"")][\n]*?\S)\s*\*(?=$|\n)/g;
+  // Make speech auto-close only when starting a new line, to avoid mid-sentence captures
+  const reSpeechOpenOnlyStr    = /(^|[\r\n])\s*"([^"\r\n]+?)\s*$/g;               // "text → "text"
+  const reSpeechOpenOnlyCurly  = /(^|[\r\n])\s*"([^"\r\n]+?)\s*$/g;                 // "text → "text"
 
   // Speech: plain quotes but not IM (supports straight and curly quotes)
   let reSpeechStraight, reSpeechCurly;
   try { reSpeechStraight = new RegExp('(?<!\\*)"([^"\\n]+?)"(?!\\*)','g'); }
   catch { reSpeechStraight = /(^|[^*])"([^"\n]+?)"(?=[^*]|$)/g; }
-  // Curly quotes “ ... ”
-  try { reSpeechCurly = new RegExp('(?<!\\*)“([^”\\n]+?)”(?!\\*)','g'); }
-  catch { reSpeechCurly = /(^|[^*])“([^”\n]+?)”(?=[^*]|$)/g; }
+  // Curly quotes " ..."
+  try { reSpeechCurly = new RegExp('(?<!\\*)"([^"]\\n]+)"?(?!\\*)','g'); }
+  catch { reSpeechCurly = /(^|[^*])"([^"\n]+)"?(?=[^*]|$)/g; }
 
   const reStrike  = /~~(?=\S)(.+?)(?<=\S)~~/g;
   const reCode    = /`([^`]+?)`/g;
@@ -350,19 +398,81 @@
     const esc=list.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
     try{ return new RegExp('(' + esc.join('|') + ')','gi'); }catch{ return null; }
   };
+  const buildCapsExcludeRegex = ()=>{
+    const list=(settings.textFormatting.capsExclusions||[]).filter(Boolean);
+    if (!list.length) return null;
+    const esc=list.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+    try{ return new RegExp('(^|[^A-Za-z])(' + esc.join('|') + ')(?=$|[^A-Za-z])','g'); }catch{ return null; }
+  };
+
+  // Remove existing ALL CAPS spans that now match an exclusion
+  const unwrapExcludedAllCaps = ()=>{
+    try{
+      const re = buildCapsExcludeRegex();
+      if (!re) return;
+      // Use a fresh regex per test to avoid lastIndex effects of /g
+      document.querySelectorAll('span.aidt-allcaps').forEach(el=>{
+        try{
+          const raw=(el.textContent||''); if(raw==='' ) return;
+          const testRe=new RegExp(re.source, 'g');
+          if (testRe.test(raw)){
+            // Preserve original whitespace around the span content
+            el.replaceWith(document.createTextNode(raw));
+          }
+        }catch(_){ }
+      });
+    }catch(_){ }
+  };
 
   // Marker to decide whether a subtree likely needs parsing
-  const MARKER_RE = /(\*\*|__|\*(?=\S)[^*]*\*|_(?=\S)[^_]*_|~~.*?~~|`[^`]+`|\^\^.*?\^\^|==.*?==|\[color=|".+?"|“.+?”)/;
+  const MARKER_RE = /(\*\*|__|\*(?=\S)[^*]*\*|_(?=\S)[^_]*_|~~.*?~~|`[^`]+`|\^\^.*?\^\^|==.*?==|\[color=|".+?"|".+?")/;
   const CAPS_MARKER_RE = /\b[A-Z]{2,}\b/;
 
   // ---------------- Transform (IM protected via placeholders) ----------------
   const transformString = (s)=>{
     let out=s;
 
+    // Normalize cut-off/open-only markup before parsing (conservative)
+    // 1) Close *"..." → *"..."*
+    out = replaceOutsideTags(out, reIMOpenOnlyClose,      (_, inner)=>'*"' + inner + '"*');
+    // 2) Per-line conservative auto-closing:
+    try{
+      const fixLine = (line)=>{
+        const t = line.trimStart();
+        // Close lone starting *text → *text*
+        if (t.startsWith('*')){
+          const rest = t.slice(1);
+          if (rest.indexOf('*') === -1) return line + '*';
+        }
+        // Close lone starting _text → _text_
+        if (t.startsWith('_')){
+          const rest = t.slice(1);
+          if (rest.indexOf('_') === -1) return line + '_';
+        }
+        // Close speech only if the line has odd number of straight quotes
+        const straightCount = (line.match(/"/g)||[]).length;
+        if (/^\s*"/.test(line) && (straightCount % 2 === 1)) return line + '"';
+        // Close curly speech only if odd number of curly quotes
+        const curlyCount = (line.match(/"/g)||[]).length;
+        if (/^\s*"/.test(line) && (curlyCount % 2 === 1)) return line + '"';
+        return line;
+      };
+      out = out.split(/\n/).map(fixLine).join('\n');
+    }catch(_){ }
+
     // Placeholders for IM so Speech pass cannot catch them
     const IM_TOK='§IM§';
     const imBuf=[];
     out = replaceOutsideTags(out, reItalicSpeech, (_, inner)=>{ imBuf.push(inner); return IM_TOK + (imBuf.length-1) + IM_TOK; });
+
+    // Line-level IM (no quotes) before generic italic handling
+    try{
+      const imStyleEarly = 'color:' + (settings.internalMonologue.colour || '#9ca3af') + ';' +
+                           (settings.internalMonologue.bold ? 'font-weight:700;' : '');
+      out = replaceOutsideTags(out, reIMLineAsterisk, (m, pre, inner)=>{
+        return (pre||'') + wrap(inner, 'aidt-im aidt-italic', imStyleEarly);
+      });
+    }catch{}
 
     // Code / strike
     out = replaceOutsideTags(out, reCode,   (_, c)=>wrap(c,'aidt-code'));
@@ -378,6 +488,8 @@
     out = replaceOutsideTags(out, reHi,     (_, a,b)=>wrap((a||b),'aidt-hi'));
     out = replaceOutsideTags(out, reColour, (_, col, inner)=>wrap(inner,'aidt-color','color:' + col));
 
+    // (IM open-only handled by normalization above)
+
     // Speech on remaining quotes (not IM)
     if (settings.rSpeechWeight){
       const spStyle = 'color:' + (settings.speech.colour || '#ffffff') + ';' +
@@ -386,8 +498,8 @@
       const curlyHasPrefix    = reSpeechCurly.source.indexOf('(^|[^*])') === 0;
       if (straightHasPrefix) out = replaceOutsideTags(out, reSpeechStraight, (m, pre, inner)=>(pre||'') + wrap('"' + inner + '"','aidt-speech', spStyle));
       else                   out = replaceOutsideTags(out, reSpeechStraight, (_, inner)=>wrap('"' + inner + '"','aidt-speech', spStyle));
-      if (curlyHasPrefix)    out = replaceOutsideTags(out, reSpeechCurly,    (m, pre, inner)=>(pre||'') + wrap('“' + inner + '”','aidt-speech', spStyle));
-      else                   out = replaceOutsideTags(out, reSpeechCurly,    (_, inner)=>wrap('“' + inner + '”','aidt-speech', spStyle));
+      if (curlyHasPrefix)    out = replaceOutsideTags(out, reSpeechCurly,    (m, pre, inner)=>(pre||'') + wrap('"' + inner + '"','aidt-speech', spStyle));
+      else                   out = replaceOutsideTags(out, reSpeechCurly,    (_, inner)=>wrap('"' + inner + '"','aidt-speech', spStyle));
     }
 
     // Keywords (phrases supported) with per-keyword effect/bold
@@ -410,7 +522,8 @@
             // Use a captured prefix so we don't rely on lookbehind
             const re=new RegExp('(^|[^\\\w])(' + esc + ')(?=$|[^\\\w])','gi');
             const cls = 'aidt-keyword' + ((kw.effect && kw.effect!=='None')?(' aidt-eff-'+kw.effect):'');
-            const style = kw.bold ? 'font-weight:700;' : '';
+            const colorStyle = (kw.color && typeof kw.color==='string' && kw.color!=='') ? ('color:'+kw.color+';') : '';
+            const style = (kw.bold ? 'font-weight:700;' : '') + colorStyle;
             acc = acc.replace(re, (m, pre, hit)=>{
               const span=document.createElement('span');
               span.className='aidt '+cls; if(style) span.setAttribute('style', style);
@@ -439,7 +552,10 @@
                       (settings.internalMonologue.bold ? 'font-weight:700;' : '');
       out = out.replace(new RegExp(IM_TOK + '(\\d+)' + IM_TOK, 'g'), (_, i)=>{
         const inner = imBuf[Number(i)] || '';
-        return wrap('"' + inner + '"', 'aidt-im aidt-italic', imStyle);
+        const plain = '"' + inner + '"';
+        // Guard: if inner is empty/whitespace or just a newline, do not treat as IM
+        if (!inner || !/\S/.test(inner) || inner.replace(/[\s\u200b]+/g,'').length===0) return plain;
+        return wrap(plain, 'aidt-im aidt-italic', imStyle);
       });
     }
 
@@ -447,12 +563,16 @@
     try{
       const eff=settings.allCapsEffect||'None';
       if (eff && eff!=='None'){
+        const exRe = buildCapsExcludeRegex();
         const wrapCaps=(text)=>{
           const tokens=text.split(/(\s+)/);
           const outParts=[]; let buf=[]; let inCaps=false;
           const isCapsToken=(tok)=>{
             const letters=tok.replace(/[^A-Za-z]+/g,'');
             return letters.length>=2 && letters===letters.toUpperCase();
+          };
+          const isExcluded=(tok)=>{
+            if (!exRe) return false; return !!tok.replace(/\s+/g,'').match(exRe);
           };
           for (let i=0;i<tokens.length;i++){
             const tok=tokens[i];
@@ -461,7 +581,7 @@
               continue;
             }
             if (!tok){ continue; }
-            if (isCapsToken(tok)){
+            if (isCapsToken(tok) && !isExcluded(tok)){
               inCaps=true; buf.push(tok);
             } else {
               if (inCaps){ outParts.push(wrap(buf.join(''),'aidt-allcaps aidt-eff-'+eff)); buf=[]; inCaps=false; }
@@ -535,9 +655,119 @@
   const reparseNow = ()=>parseRootsDeep();
 
   // Parse only the latest output container (fast path for newest paragraph)
-  const LATEST_SELECTORS = '#gameplay-output #transition-opacity, #gameplay-output span._blw-0hover-0px, span._blw-0hover-0px, #transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], [data-testid="story-container"], span.font_heading, span.font_gameplay, p.font_gameplay, div.font_gameplay, .w_comment, .w-comment, .w_run, .w-run';
+  const LATEST_SELECTORS = '#gameplay-output #do-not-copy, #do-not-copy, #gameplay-output #transition-opacity, #gameplay-output span._blw-0hover-0px, span._blw-0hover-0px, #transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], [data-testid="story-container"], span.font_heading, span.font_gameplay, p.font_gameplay, div.font_gameplay, .w_comment, .w-comment, .w_run, .w-run';
+  // Helper: return the LAST match for a selector within an optional root
+  function ql(sel, root){
+    try{
+      const r = root || document;
+      const nodes = r.querySelectorAll(sel);
+      return (nodes && nodes.length) ? nodes[nodes.length-1] : null;
+    }catch(_){ return null; }
+  }
+  function syncOverlayFromCopy(){
+    try{
+      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
+      const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
+      const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
+      if (!copy || !overlay) return;
+      const copyText = (function(){ try{ return pickTextElement(copy) || copy; }catch(_){ return copy; } })();
+      const copyHTML = String((copyText && copyText.innerHTML) || copy.innerHTML || '');
+      if (!copyHTML) return;
+      if (overlay.innerHTML !== copyHTML){
+        overlay.innerHTML = copyHTML;
+        try{ applyInlineSpanStyles(); }catch(_){ }
+        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+        dbg('syncOverlayFromCopy: overlay replaced with copyText HTML');
+      }
+      try{
+        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
+        if (saturate && saturate.innerHTML !== copyHTML){
+          saturate.innerHTML = copyHTML;
+          try{ applyInlineSpanStyles(); }catch(_){ }
+          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+          dbg('syncOverlayFromCopy: saturate replaced with copyText HTML');
+        }
+      }catch(_){ }
+    }catch(_){ }
+  }
+
+  // If only a tiny part of quotes is detected as speech (due to split-word spans),
+  // rebuild the entire paragraph HTML from textContent using our transformer.
+  function retransformFromTextContent(el){
+    try{
+      if (!el) return;
+      const text = txt(el) || '';
+      if (!text) return;
+      const html = transformString(text);
+      if (html && html !== text){
+        el.innerHTML = html;
+        try{ applyInlineSpanStyles(); }catch(_){ }
+        dbg('retransformFromTextContent: replaced innerHTML from textContent');
+      }
+    }catch(_){ }
+  }
+
+  // Rebuild visible paragraphs from plain text so caps/keyword rules re-evaluate instantly
+  function rebuildVisibleParagraphs(){
+    try{
+      const preferred=document.getElementById('gameplay-output');
+      const nodes = preferred ? preferred.querySelectorAll(LATEST_SELECTORS) : document.querySelectorAll(LATEST_SELECTORS);
+      if (!nodes || !nodes.length) return;
+      nodes.forEach(n=>{ try{ const t=pickTextElement(n); if(t) retransformFromTextContent(t); }catch(_){ } });
+    }catch(_){ }
+  }
+
+  // Stronger overlay normalizer: rebuild overlay from the plain text of the copy container
+  function normalizeOverlay(){
+    try{
+      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
+      if (!overlay) return;
+      const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
+      const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
+      const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
+      const text = txt(source) || '';
+      if (!text) return;
+      const html = transformString(text) || '';
+      if (html && overlay.innerHTML !== html){
+        overlay.innerHTML = html;
+        try{ applyInlineSpanStyles(); }catch(_){ }
+        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+        dbg('normalizeOverlay: overlay replaced from source text');
+      }
+      try{
+        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
+        if (saturate && html && saturate.innerHTML !== html){
+          saturate.innerHTML = html;
+          try{ applyInlineSpanStyles(); }catch(_){ }
+          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+          dbg('normalizeOverlay: saturate replaced from source text');
+        }
+      }catch(_){ }
+    }catch(_){ }
+  }
+
+  function setupOverlayObserver(){
+    try{
+      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
+      if (!overlay) return;
+      const rebalance = debounce(()=>{ try{ normalizeOverlay(); }catch(_){ } }, 80);
+      const mo = new MutationObserver(function(muts){
+        for (var i=0;i<muts.length;i++){
+          var m=muts[i];
+          if (m.type==='childList' || m.type==='characterData' || m.type==='attributes'){ rebalance(); break; }
+        }
+      });
+      mo.observe(overlay, {childList:true, subtree:true, characterData:true, attributes:true});
+      try{
+        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
+        if (saturate) mo.observe(saturate, {childList:true, subtree:true, characterData:true, attributes:true});
+      }catch(_){ }
+      try{ window.__AIDT_OVERLAY_OBSERVER__ = mo; }catch(_){ }
+    }catch(_){ }
+  }
   const parseWithinRoot = (root, force)=>{
     if (!settings.enabled || !root || isDanger(root)) return;
+    try{ if (!force && window.__AIDT_PAUSE__) return; }catch(_){ }
     const kwEnabled=(settings.textFormatting.keywords||[]).length>0;
     const capsEnabled=!!(settings.allCapsEffect && settings.allCapsEffect!=='None');
     const subtree = txt(root);
@@ -567,10 +797,26 @@
   // Prefer visible gameplay text elements, not inside copy-overlay containers
   function pickTextElement(container){
     try{
+      // If the given container is the highlight/saturate overlay (split into per-word spans),
+      // prefer the hidden copy container which holds full paragraph HTML.
+      try{
+        if (container && (
+          (container.id && container.id==='transition-opacity') ||
+          (container.querySelector && container.querySelector('#game-backdrop-saturate'))
+        )){
+          const alt = document.querySelector('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay');
+          if (alt) return alt;
+          // Fallback: use the copy container itself if a specific child wasn't found
+          const copy = document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
+          if (copy) return copy;
+        }
+      }catch(_){ }
       const candidates = container.querySelectorAll('span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
       for (let i=0;i<candidates.length;i++){
         const el=candidates[i];
-        if (el.closest && !el.closest('#do-not-copy') && !el.hasAttribute('aria-hidden')) return el;
+        // Skip split-word overlay nodes
+        if (el.querySelector && el.querySelector('#game-backdrop-saturate')) continue;
+        if (el.closest && !el.hasAttribute('aria-hidden')) return el;
       }
       return candidates[0] || container;
     }catch(_){ return container; }
@@ -578,12 +824,12 @@
   // Fallback finder: last visible gameplay text element anywhere
   function findLatestTextEl(){
     try{
-      const nodes = document.querySelectorAll('span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      const nodes = document.querySelectorAll('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay, span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
       if (!nodes || !nodes.length) return null;
       // choose the last node that is not aria-hidden and not inside copy overlay
       for (let i=nodes.length-1;i>=0;i--){
         const el = nodes[i];
-        if (el && (!el.hasAttribute('aria-hidden')) && (!el.closest || !el.closest('#do-not-copy'))) return el;
+        if (el && (!el.hasAttribute('aria-hidden'))) return el;
       }
       return nodes[nodes.length-1];
     }catch(_){ return null; }
@@ -617,7 +863,7 @@
           const em = italics[i];
           const v = (em.textContent||'').trim();
           if (!v) continue;
-          if (/^("|“)[\s\S]+("|”)$/.test(v)){
+          if (/^("|")[\s\S]+("|")$/.test(v)){
             const span=document.createElement('span');
             span.className='aidt aidt-im aidt-italic';
             span.textContent=v;
@@ -627,7 +873,7 @@
         // Heuristic: if no IM spans yet, tolerate spaces around asterisks
         if (!textEl.querySelector('.aidt-im')){
           const raw = textEl.textContent || '';
-          const loose = /\*\s*(["“][\s\S]*?["”])\s*\*/g;
+          const loose = /\*\s*([""][^\n]*?[""])\s*\*/g;
           if (loose.test(raw)){
             const html2 = transformString(raw.replace(loose, '*$1*'));
             if (html2 && html2 !== raw){ textEl.innerHTML = html2; applyInlineSpanStyles(); }
@@ -641,7 +887,8 @@
   }
   const parseLatestOutput = ()=>{
     try{
-      const preferred = document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
       dbg('parseLatestOutput: preferred=', !!preferred);
       if (preferred){
         // First, run the normal node-by-node transform
@@ -659,8 +906,8 @@
           const hasIMSpan = !!textEl.querySelector('.aidt-im');
           const hasSpeechSpan = !!textEl.querySelector('.aidt-speech');
           const text = txt(textEl);
-          const hasIMPattern = /\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(text);
-          const hasSpeechPattern = /(["“][^"”\n]+["”])/.test(text);
+          const hasIMPattern = /\*(?:"|")[\s\S]*?(?:"|")\*/.test(text);
+          const hasSpeechPattern = /(["][^"\n]+["])/.test(text);
           dbg('parseLatestOutput: spans(im,speech)=', hasIMSpan, hasSpeechSpan, 'patterns(im,speech)=', hasIMPattern, hasSpeechPattern);
           dbg('parseLatestOutput: child visibility=', {im: hasVisibleDesc(textEl,'.aidt-im'), speech: hasVisibleDesc(textEl,'.aidt-speech')});
           if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
@@ -670,6 +917,13 @@
             finalizeLatestOnce(textEl);
           }
         }catch(_e){}
+        // If spans exist but are not visible (overlay split), rebuild from text
+        try{
+          const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!textEl.querySelector('.aidt-speech');
+          const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!textEl.querySelector('.aidt-im');
+          if (speechHidden || imHidden) retransformFromTextContent(textEl);
+        }catch(_){ }
+        try{ syncOverlayFromCopy(); }catch(_){ }
         return;
       }
       const els=document.querySelectorAll(LATEST_SELECTORS);
@@ -684,8 +938,8 @@
           const textEl = fallbackEl;
           const hasSpeechSpans = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
           const text = txt(textEl);
-          dbg('parseLatestOutput: hasSpeechSpans=', hasSpeechSpans, 'markers=', /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(text));
-          if (!hasSpeechSpans && /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(text)){
+          dbg('parseLatestOutput: hasSpeechSpans=', hasSpeechSpans, 'markers=', /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(text));
+          if (!hasSpeechSpans && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(text)){
             const html = transformString(text);
             dbg('parseLatestOutput: transformed=', html!==text);
             if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
@@ -705,8 +959,8 @@
         const hasIMSpan = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
         const hasSpeechSpan = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
         const text = txt(textEl);
-        const hasIMPattern = /\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(text);
-        const hasSpeechPattern = /(["“][^"”\n]+["”])/.test(text);
+        const hasIMPattern = /\*(?:"|")[\s\S]*?(?:"|")\*/.test(text);
+        const hasSpeechPattern = /(["][^"\n]+["])/.test(text);
         if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
           const html = transformString(text);
           if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
@@ -715,28 +969,43 @@
         }
         dbg('parseLatestOutput: spans(im,speech)=', hasIMSpan, hasSpeechSpan, 'patterns(im,speech)=', hasIMPattern, hasSpeechPattern);
       }catch(_e){}
+      try{
+        const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
+        const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
+        if (speechHidden || imHidden) retransformFromTextContent(textEl);
+      }catch(_){ }
+      try{ syncOverlayFromCopy(); normalizeOverlay(); }catch(_){ }
     }catch{}
   };
 
   // Strong finalizer for newest paragraph: combines parsing + inline transform
   function ensureLatestFormatted(){
     try{
-      const preferred = document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
       const container = preferred || null;
       const textEl = container ? pickTextElement(container) : (findLatestTextEl() || null);
-      dbg('ensureLatestFormatted: preferred=', !!preferred, 'textEl=', !!textEl);
+      dbg('ensureLatestFormatted: preferred=', !!preferred, preferred ? preferred.id||preferred.tagName : null, 'textEl=', !!textEl);
+      __aidt_debugDumpLatest(container || textEl, textEl);
       if (!textEl) return;
       try{ parseWithinRoot(container || textEl, true); dbg('ensureLatestFormatted: parseWithinRoot ok'); }catch(_e0){ dbgw('ensureLatestFormatted: parseWithinRoot error', _e0); }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
       try{
         const hasSpans = !!(textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
         const t = txt(textEl);
-        dbg('ensureLatestFormatted: hasSpans=', hasSpans, 'len=', (t||'').length, 'markers=', /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(t));
-        if (!hasSpans && /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(t)){
+        dbg('ensureLatestFormatted: hasSpans=', hasSpans, 'len=', (t||'').length, 'markers=', /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(t));
+        if (!hasSpans && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(t)){
           const html = transformString(t);
           dbg('ensureLatestFormatted: transformed=', html!==t);
           if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
         }
+        __aidt_debugMarkLatest(container || textEl, textEl);
+        syncOverlayFromCopy();
+        try{
+          const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
+          const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
+          if (speechHidden || imHidden) retransformFromTextContent(textEl);
+        }catch(_){ }
       }catch(_e2){}
     }catch(_){ }
   }
@@ -744,6 +1013,7 @@
   // Format all target elements (full sweep like content.js)
   const formatAllTargetElements = ()=>{
     try{
+      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       const preferred = document.getElementById('gameplay-output');
       if (preferred){
         const nodes = preferred.querySelectorAll(LATEST_SELECTORS);
@@ -756,6 +1026,12 @@
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
         try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); } }catch(_e){}
       }
+      try{
+        // Mark the last matched node for clarity
+        const last = document.querySelector('#gameplay-output #transition-opacity, #transition-opacity');
+        if (last){ __aidt_debugDumpLatest(last, pickTextElement(last)); __aidt_debugMarkLatest(last, pickTextElement(last)); }
+        syncOverlayFromCopy();
+      }catch(_){ }
     }catch{}
   };
 
@@ -766,15 +1042,15 @@
     let latestMo=null; let latestTarget=null;
     const attachLatestObserver=()=>{
       try{
-        const preferred = document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+        const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
         const candidate = preferred || (document.querySelectorAll(LATEST_SELECTORS)||[])[(document.querySelectorAll(LATEST_SELECTORS)||[]).length-1];
         if (!candidate || candidate===latestTarget) return;
         if (latestMo) { try{ latestMo.disconnect(); }catch(_){}; latestMo=null; }
         latestTarget=candidate;
-        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
+        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
         latestMo.observe(latestTarget,{childList:true,subtree:true,characterData:true});
         // Immediate pass on attach
-        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["“][^"”\n]+["”])|\*(?:"|“)[\s\S]*?(?:"|”)\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
+        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
       }catch(_){ }
     };
     const flush=()=>{
@@ -834,8 +1110,7 @@
       '.aidt-italic{font-style:italic}' +
       '.aidt-speech{}' +
       '.aidt-im{}' +
-      // Hide AI Dungeon backdrop/word overlays that are aria-hidden and block our spans on newest line
-      '#gameplay-output [aria-hidden="true"].font_gameplay{display:none!important}' +
+      // Note: do not hide aria-hidden gameplay nodes; some flows temporarily set aria-hidden on the latest paragraph
       '.aidt-strike{text-decoration:line-through;opacity:.9}' +
       '.aidt-code{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(0,0,0,.12);padding:0 .25em;border-radius:3px}' +
       '.aidt-hi{background:rgba(255,255,0,.28);padding:0 .1em;border-radius:2px}' +
@@ -929,7 +1204,7 @@
       if (BG_APPLIED_ONCE) return;
       if ((settings.backgroundType||'default')!=='solid') return; // nothing to do
       const uiReady = document.readyState==='complete';
-      const hasTargets = !!document.querySelector('#gameplay-output, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      const hasTargets = !!document.querySelector('#gameplay-output, #do-not-copy, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
       if (uiReady && hasTargets){ applyBackground(); return; }
       setTimeout(scheduleBackgroundApply, 180);
     }catch(_){ setTimeout(scheduleBackgroundApply, 200); }
@@ -1047,6 +1322,41 @@
     const imW   = settings.internalMonologue.bold ? '700' : '';
     document.querySelectorAll('.aidt-im, .ai-italic-speech, em.ai-italic-speech').forEach(el=>{ try{ el.style.setProperty('color', imCol, 'important'); el.style.setProperty('font-weight', imW || '400', 'important'); }catch{} });
 
+    // Italics (unquoted) color/weight
+    try{
+      const itCol = settings.italics.colour || '#facc15';
+      const itW   = settings.italics.bold ? '700' : '';
+      document.querySelectorAll('.aidt-italic:not(.aidt-im)').forEach(el=>{
+        try{
+          el.style.setProperty('color', itCol, 'important');
+          el.style.setProperty('font-weight', itW || '400', 'important');
+        }catch(_){ }
+      });
+    }catch(_){ }
+
+    // Heuristic: treat full-line italic blocks as IM and tint them
+    try{
+      const looksLikeSentence=(t)=>{
+        const s=(t||'').trim();
+        if (s.length<8) return false;
+        const words=s.split(/\s+/).length;
+        return words>=3 || /[\.\!\?]$/.test(s);
+      };
+      document.querySelectorAll('.aidt-italic:not(.aidt-im)').forEach(el=>{
+        try{
+          if (el.closest('.aidt-speech')) return; // do not tint italics inside speech
+          const t=(el.textContent||'').trim(); if(!looksLikeSentence(t)) return;
+          const parent=el.parentElement; if(!parent) return;
+          const ptxt=(parent.textContent||'').trim();
+          if (ptxt===t){ // italic is the sole content of the block
+            el.classList.add('ai-italic-speech');
+            el.style.setProperty('color', imCol, 'important');
+            el.style.setProperty('font-weight', imW || '400', 'important');
+          }
+        }catch(_){ }
+      });
+    }catch(_){ }
+
     // Update ALL CAPS effect classes instantly
     try{
       const eff=settings.allCapsEffect||'None';
@@ -1064,8 +1374,8 @@
       const map=new Map();
       list.forEach(k=>{
         if (!k) return;
-        if (typeof k==='string') map.set(k.toLowerCase(), {effect:'None', bold:false});
-        else map.set((k.text||'').toLowerCase(), {effect:(k.effect||'None'), bold:!!k.bold});
+        if (typeof k==='string') map.set(k.toLowerCase(), {effect:'None', bold:false, color:null});
+        else map.set((k.text||'').toLowerCase(), {effect:(k.effect||'None'), bold:!!k.bold, color:(k.color||null)});
       });
       // Ensure older keyword spans get data attribute
       document.querySelectorAll('span.aidt-keyword:not([data-aidt-keyword])').forEach(el=>{
@@ -1082,9 +1392,11 @@
           el.style.removeProperty('animation');
           el.style.removeProperty('filter');
           el.style.removeProperty('transform');
+          el.style.removeProperty('color');
           if (cfg){
             if (cfg.effect && cfg.effect!=='None') el.classList.add('aidt-eff-'+cfg.effect);
             if (cfg.bold) el.style.fontWeight='700';
+            if (cfg.color && typeof cfg.color==='string'){ el.style.setProperty('color', cfg.color, 'important'); }
             // Ensure Rainbow is visible on near-white text by giving a vivid base color
             try{
               if (cfg.effect==='Rainbow'){
@@ -1215,12 +1527,14 @@
 
         '<div class="group"><h4>'+T('Do')+'</h4>' +
           '<div class="row"><span>'+T('Bold')+'</span><div id="sw-do-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><input id="sel-do-colour" type="color" value="#ffffff"/><button id="rst-do-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-do-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-do-colour" type="color" value="#ffffff"/><button id="rst-do-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
         '<div class="group"><h4>'+T('Say')+'</h4>' +
           '<div class="row"><span>'+T('Bold')+'</span><div id="sw-say-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><input id="sel-say-colour" type="color" value="#ffffff"/><button id="rst-say-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-say-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-say-colour" type="color" value="#ffffff"/><button id="rst-say-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
         '' +
@@ -1231,19 +1545,29 @@
         // Main Text first
         '<div class="group"><h4>'+T('Main Text')+'</h4>' +
           '<div class="row"><span>'+T('Bold')+'</span><div id="sw-main-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><input id="sel-main-colour" type="color" value="#ffffff"/><button id="rst-main-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-main-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-main-colour" type="color" value="#ffffff"/><button id="rst-main-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
         // Speech
         '<div class="group"><h4>'+T('Speech')+'</h4>' +
           '<div class="row"><span>'+T('Bold')+'</span><div id="sw-sp-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><input id="sel-sp-colour" type="color"/><button id="rst-sp-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-sp-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-sp-colour" type="color"/><button id="rst-sp-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
         // Internal Monologue
         '<div class="group"><h4>'+T('Internal Monologue')+'</h4>' +
           '<div class="row"><span>'+T('Bold')+'</span><div id="sw-im-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><input id="sel-im-colour" type="color"/><button id="rst-im-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-im-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-im-colour" type="color"/><button id="rst-im-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+        '</div>' +
+
+        // Italics (unquoted)
+        '<div class="group"><h4>'+T('Italics')+'</h4>' +
+          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-it-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
+          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-it-presets" class="presets"></select></div>' +
+          '<div class="row"><span></span><input id="sel-it-colour" type="color"/><button id="rst-it-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
         // Keywords
@@ -1255,6 +1579,8 @@
         // All Caps Effects
         '<div class="group"><h4>'+T('All Caps Effects')+'</h4>' +
           '<div class="row"><span>'+T('Effect')+'</span><select id="dd-effects"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option></select><span></span></div>' +
+          '<div class="row"><span>'+T('Exclusions')+'</span><input id="tf-caps-ex-input" type="text" placeholder="HQ, CEO, NASA…"/><button id="tf-caps-ex-add" class="reset" title="'+T('Add')+'">＋</button></div>' +
+          '<div id="tf-caps-ex-chips" class="chips"></div>' +
         '</div>' +
 
         // Font block
@@ -1330,14 +1656,16 @@
       settings.textFormatting.keywords=list;
       list.forEach((kw,idx)=>{
         const chip=document.createElement('span'); chip.className='chip';
-        const selId='kw-eff-'+idx; const swId='kw-bold-'+idx; const delId='kw-del-'+idx;
+        const selId='kw-eff-'+idx; const swId='kw-bold-'+idx; const colId='kw-col-'+idx; const delId='kw-del-'+idx;
         chip.innerHTML=
           '<span>'+kw.text+'</span>'+
-          ' <select id="'+selId+'"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option></select>'+
+          ' <select id="'+selId+'"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option><option value="__custom__">Custom Color…</option></select>'+
+          ' <input id="'+colId+'" type="color" style="display:none; vertical-align:middle; width:22px; height:22px; padding:0; border:none; background:transparent" />'+
           ' <span class="switch" id="'+swId+'"><div class="knob"></div></span>'+
           ' <button id="'+delId+'">×</button>';
         wrap.appendChild(chip);
-        const sel=chip.querySelector('#'+selId); if(sel){ sel.value=kw.effect||'None'; sel.addEventListener('change',()=>{ kw.effect=sel.value||'None'; persistSettings(); applyGlobal(); reparseNow(); }); }
+        const sel=chip.querySelector('#'+selId); if(sel){ sel.value=kw.effect||'None'; sel.addEventListener('change',()=>{ if (sel.value==='__custom__'){ const prev=kw.effect||'None'; sel.value=prev; const ci=chip.querySelector('#'+colId); if(ci){ ci.style.display='inline-block'; ci.focus(); ci.click(); } return; } kw.effect=sel.value||'None'; persistSettings(); applyGlobal(); reparseNow(); }); }
+        const col=chip.querySelector('#'+colId); if(col){ col.value = (kw.color||'#ffffff'); col.addEventListener('input', ()=>{ kw.color=col.value; persistSettings(); applyGlobal(); reparseNow(); }); col.addEventListener('change', ()=>{ kw.color=col.value; persistSettings(); applyGlobal(); reparseNow(); }); }
         const sw=chip.querySelector('#'+swId); if(sw){ setSwitch(sw, !!kw.bold); sw.addEventListener('click',()=>{ kw.bold=!kw.bold; setSwitch(sw, !!kw.bold); persistSettings(); applyGlobal(); reparseNow(); }); }
         const del=chip.querySelector('#'+delId); if(del){ del.addEventListener('click',()=>{ settings.textFormatting.keywords.splice(idx,1); persistSettings(); renderKeywordChips(); applyGlobal(); reparseNow(); }); }
       });
@@ -1355,8 +1683,10 @@
       setSwitch($('#sw-enabled'), !!settings.enabled);
       setSwitch($('#sw-do-bold'), !!settings.actions.do.bold);
       $('#sel-do-colour').value = settings.actions.do.colour || '#ffffff';
+      const ddDo=$('#dd-do-presets'); if (ddDo){ ddDo.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddDo.value = settings.actions.do.colour || '#ffffff'; }
       setSwitch($('#sw-say-bold'), !!settings.actions.say.bold);
       $('#sel-say-colour').value = settings.actions.say.colour || '#ffffff';
+      const ddSay=$('#dd-say-presets'); if (ddSay){ ddSay.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddSay.value = settings.actions.say.colour || '#ffffff'; }
 
       $('#dd-effects').value   = settings.allCapsEffect || 'None';
       $('#dd-font-family').value = settings.fontFamily || 'inherit';
@@ -1368,13 +1698,34 @@
 
       renderKeywordChips();
 
+      // Caps exclusion chips
+      const renderCapsEx=()=>{
+        const wrap=$('#tf-caps-ex-chips'); if(!wrap) return;
+        wrap.innerHTML='';
+        const list=(settings.textFormatting.capsExclusions||[]);
+        list.forEach((word, idx)=>{
+          const chip=document.createElement('span'); chip.className='chip';
+          chip.innerHTML='<span>'+word+'</span><button id="del-ce-'+idx+'" class="reset" title="Remove">×</button>';
+          wrap.appendChild(chip);
+          const del=chip.querySelector('#del-ce-'+idx+''); if(del){ del.addEventListener('click',()=>{ settings.textFormatting.capsExclusions.splice(idx,1); persistSettings(); renderCapsEx(); rebuildVisibleParagraphs(); applyGlobal(); reparseNow(); }); }
+        });
+      };
+      renderCapsEx();
+
       setSwitch($('#sw-main-bold'), !!settings.textFormatting.mainText.bold);
       $('#sel-main-colour').value = settings.textFormatting.mainText.colour || '#ffffff';
+      const ddMain=$('#dd-main-presets'); if (ddMain){ ddMain.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddMain.value = settings.textFormatting.mainText.colour || '#ffffff'; }
 
       setSwitch($('#sw-im-bold'), !!settings.internalMonologue.bold);
       $('#sel-im-colour').value = settings.internalMonologue.colour || '#9ca3af';
+      const ddIm=$('#dd-im-presets'); if (ddIm){ ddIm.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddIm.value = settings.internalMonologue.colour || '#9ca3af'; }
+
+      setSwitch($('#sw-it-bold'), !!settings.italics.bold);
+      $('#sel-it-colour').value = settings.italics.colour || '#facc15';
+      const ddIt=$('#dd-it-presets'); if (ddIt){ ddIt.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddIt.value = settings.italics.colour || '#facc15'; }
       setSwitch($('#sw-sp-bold'), !!settings.speech.bold);
       $('#sel-sp-colour').value  = settings.speech.colour || '#ffffff';
+      const ddSp=$('#dd-sp-presets'); if (ddSp){ ddSp.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddSp.value = settings.speech.colour || '#ffffff'; }
 
       $('#dd-bg-type').value = settings.backgroundType || 'default';
       $('#sel-bg-colour').value = settings.bgColour || '#111827';
@@ -1417,19 +1768,24 @@
       setText('section[data-section="format"] .group:nth-of-type(3) .row:nth-of-type(1) span:first-child','Bold');
       setText('section[data-section="format"] .group:nth-of-type(3) .row:nth-of-type(2) span:first-child','Colour');
       setTitle('#rst-im-colour','Reset');
-      setText('section[data-section="format"] .group:nth-of-type(4) h4','Keywords');
-      setText('section[data-section="format"] .group:nth-of-type(4) .row:nth-of-type(1) span:first-child','Add Keyword');
+      setText('section[data-section="format"] .group:nth-of-type(4) h4','Italics');
+      setText('section[data-section="format"] .group:nth-of-type(4) .row:nth-of-type(1) span:first-child','Bold');
+      setText('section[data-section="format"] .group:nth-of-type(4) .row:nth-of-type(2) span:first-child','Colour');
+      setTitle('#rst-it-colour','Reset');
+      setText('section[data-section="format"] .group:nth-of-type(5) h4','Keywords');
+      setText('section[data-section="format"] .group:nth-of-type(5) .row:nth-of-type(1) span:first-child','Add Keyword');
       setTitle('#tf-keyword-add','Add');
-      setText('section[data-section="format"] .group:nth-of-type(5) h4','All Caps Effects');
-      setText('section[data-section="format"] .group:nth-of-type(5) .row:nth-of-type(1) span:first-child','Effect');
-      setText('section[data-section="format"] .group:nth-of-type(6) h4','Font');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(1) span:first-child','Font Family');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(2) span:first-child','Font Size');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(3) span:first-child','Font Weight');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(4) span:first-child','Line Height');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(5) span:first-child','Letter Spacing');
-      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(6) span:first-child','Text Alignment');
-      setText('section[data-section="format"] .group:nth-of-type(6) .actions button#rst-font-block','Reset Font');
+      setText('section[data-section="format"] .group:nth-of-type(6) h4','All Caps Effects');
+      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(1) span:first-child','Effect');
+      setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(2) span:first-child','Exclusions');
+      setText('section[data-section="format"] .group:nth-of-type(7) h4','Font');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(1) span:first-child','Font Family');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(2) span:first-child','Font Size');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(3) span:first-child','Font Weight');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(4) span:first-child','Line Height');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(5) span:first-child','Letter Spacing');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(6) span:first-child','Text Alignment');
+      setText('section[data-section="format"] .group:nth-of-type(7) .actions button#rst-font-block','Reset Font');
       p.querySelectorAll('.reset').forEach(b=>{ try{ b.setAttribute('title', T('Reset')); }catch(_){ } });
       // Misc → Background
       setText('section[data-section="misc"] .group:nth-of-type(1) h4','Background');
@@ -1454,16 +1810,16 @@
       // Reset All
       setText('section[data-section="misc"] > .actions button#reset-all','Reset All');
       // Update switch titles
-      ['#sw-enabled','#sw-do-bold','#sw-say-bold','#sw-im-bold','#sw-sp-bold','#sw-main-bold'].forEach(sel=>{ const el=$(sel); if(el){ setSwitch(el, getSwitch(el)); } });
+      ['#sw-enabled','#sw-do-bold','#sw-say-bold','#sw-im-bold','#sw-it-bold','#sw-sp-bold','#sw-main-bold'].forEach(sel=>{ const el=$(sel); if(el){ setSwitch(el, getSwitch(el)); } });
     };
 
     const harvest=()=>{
       settings.enabled = getSwitch($('#sw-enabled'));
 
       settings.actions.do.bold   = getSwitch($('#sw-do-bold'));
-      settings.actions.do.colour = $('#sel-do-colour').value || '#ffffff';
+      settings.actions.do.colour = ($('#dd-do-presets').value || $('#sel-do-colour').value || '#ffffff');
       settings.actions.say.bold  = getSwitch($('#sw-say-bold'));
-      settings.actions.say.colour= $('#sel-say-colour').value || '#ffffff';
+      settings.actions.say.colour= ($('#dd-say-presets').value || $('#sel-say-colour').value || '#ffffff');
 
       settings.allCapsEffect = $('#dd-effects').value || 'None';
       settings.fontFamily    = $('#dd-font-family').value || 'inherit';
@@ -1474,12 +1830,14 @@
       settings.textAlign     = $('#dd-text-align').value || 'default';
 
       settings.textFormatting.mainText.bold   = getSwitch($('#sw-main-bold'));
-      settings.textFormatting.mainText.colour = $('#sel-main-colour').value || '#ffffff';
+      settings.textFormatting.mainText.colour = ($('#dd-main-presets').value || $('#sel-main-colour').value || '#ffffff');
 
       settings.internalMonologue.bold   = getSwitch($('#sw-im-bold'));
-      settings.internalMonologue.colour = $('#sel-im-colour').value || '#9ca3af';
+      settings.internalMonologue.colour = ($('#dd-im-presets').value || $('#sel-im-colour').value || '#9ca3af');
+      settings.italics.bold   = getSwitch($('#sw-it-bold'));
+      settings.italics.colour = ($('#dd-it-presets').value || $('#sel-it-colour').value || '#facc15');
       settings.speech.bold              = getSwitch($('#sw-sp-bold'));
-      settings.speech.colour            = $('#sel-sp-colour').value || '#ffffff';
+      settings.speech.colour            = ($('#dd-sp-presets').value || $('#sel-sp-colour').value || '#ffffff');
 
       settings.backgroundType = $('#dd-bg-type').value || 'default';
       settings.bgColour       = $('#sel-bg-colour').value || '#111827';
@@ -1498,6 +1856,7 @@
     bindReset('rst-text-align',  ()=>{ settings.textAlign=DEFAULTS.textAlign; });
     bindReset('rst-main-colour', ()=>{ settings.textFormatting.mainText.colour=DEFAULTS.textFormatting.mainText.colour; });
     bindReset('rst-im-colour',   ()=>{ settings.internalMonologue.colour=DEFAULTS.internalMonologue.colour; applyInlineSpanStyles(); });
+    bindReset('rst-it-colour',   ()=>{ settings.italics.colour=DEFAULTS.italics.colour; applyInlineSpanStyles(); });
     bindReset('rst-sp-colour',   ()=>{ settings.speech.colour=DEFAULTS.speech.colour; });
     bindReset('rst-bg-type',     ()=>{ settings.backgroundType=DEFAULTS.backgroundType; });
     bindReset('rst-bg-colour',   ()=>{ settings.bgColour=DEFAULTS.bgColour; });
@@ -1519,7 +1878,7 @@
     });
 
     // selects/inputs → instant
-    ['sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','sel-main-colour','sel-im-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','dd-lang','dd-profile'].forEach(id=>{
+    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','dd-lang','dd-profile'].forEach(id=>{
       const el=$('#'+id); if(!el) return;
       el.addEventListener('input',  applyLive);
       el.addEventListener('change', applyLive);
@@ -1537,6 +1896,18 @@
     };
     const addBtn=$('#tf-keyword-add'); if(addBtn) addBtn.addEventListener('click', ()=>{ addKeyword(); applyGlobal(); reparseNow(); });
     if (kwInput){ kwInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addKeyword(); applyGlobal(); reparseNow(); } }); }
+
+    // Caps exclusions add/remove
+    const exInput=$('#tf-caps-ex-input');
+    const addExcl=()=>{
+      if (!exInput) return;
+      const v=(exInput.value||'').trim(); if(!v) return;
+      settings.textFormatting.capsExclusions=settings.textFormatting.capsExclusions||[];
+      settings.textFormatting.capsExclusions.push(v);
+      exInput.value=''; persistSettings(); refreshUI(); unwrapExcludedAllCaps(); applyGlobal(); reparseNow();
+    };
+    const exBtn=$('#tf-caps-ex-add'); if (exBtn) exBtn.addEventListener('click', ()=>{ addExcl(); });
+    if (exInput){ exInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addExcl(); } }); }
 
     // Export / Import
     $('#btn-export').addEventListener('click', ()=>{
@@ -1560,7 +1931,7 @@
           }
           profiles=loadJSON(LS_PROFILES,{profiles:{}}); bindings=loadJSON(LS_BINDINGS,{});
           refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); ev.target.value='';
-        }catch(e){ console.warn('[AIDT] Import failed', e); }
+        }catch(e){ /* import failed (silenced) */ }
       };
       r.readAsText(f);
     });
@@ -1708,6 +2079,22 @@
       // Force an initial latest parse-and-style sweep after first paint, then apply background last
       try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
       observer.observe(document.body, { childList:true, subtree:true, characterData:true });
+      // Begin watching the overlay to normalize split-word spans continuously
+      try{ setupOverlayObserver(); normalizeOverlay(); }catch(_){ }
+      // Toggle debug: Ctrl+Alt+D
+      try{
+        window.addEventListener('keydown', function(e){
+          try{
+            if (e.ctrlKey && e.altKey && (e.key==='d' || e.key==='D')){
+              const cur = (localStorage.getItem('AIDT_DEBUG')==='1');
+              localStorage.setItem('AIDT_DEBUG', cur?'0':'1');
+              if (!window.__AIDT_DEBUG__ && !cur) window.__AIDT_DEBUG__ = true; // allow temporary session toggle
+              dbg('Debug toggled. Now:', !cur);
+              setTimeout(()=>{ try{ ensureLatestFormatted(); }catch(_){ } }, 0);
+            }
+          }catch(_){ }
+        }, true);
+      }catch(_){ }
       setupFormatObserver();
       [0,150,350,700,1200,2000,3500].forEach(ms=>setTimeout(()=>{ __aidt_reparse2(); __aidt_reapply2(); ensureLatestFormatted(); }, ms));
       if (api && api.showTab) api.showTab('actions');
@@ -1892,7 +2279,7 @@ for (var b=0;b<doBlocks.length;b++){
         var el = e.target && e.target.closest ? e.target.closest('button,[role=\"button\"],a') : null;
         if (!el) return;
         var t = (el.textContent || '').toLowerCase();
-        if (/continue|take a turn|retry|erase|send|submit|undo|redo|edit/.test(t)){
+        if (/continue|take a turn|retry|erase|send|submit|undo|redo|edit|select/.test(t)){
           setTimeout(function(){ AIDT_applySayDo(document); }, 60);
         }
       }catch(e){}
@@ -1910,6 +2297,9 @@ for (var b=0;b<doBlocks.length;b++){
   }
   if (typeof window.__AIDT_CORE__.reapply !== 'function' && typeof __aidt_reapply2 === 'function') {
     window.__AIDT_CORE__.reapply = __aidt_reapply2;
+  }
+  if (typeof window.__AIDT_CORE__.ensure !== 'function' && typeof ensureLatestFormatted === 'function') {
+    window.__AIDT_CORE__.ensure = ensureLatestFormatted;
   }
 }catch(e){}})();
 
@@ -1969,19 +2359,29 @@ for (var b=0;b<doBlocks.length;b++){
         var el = ev.target && ev.target.closest ? ev.target.closest('button,[role="button"],a,.is_Button,.btn') : null;
         if (!el) return;
         var label = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
-        if (!/continue|take a turn|retry|erase|send|submit|generate|edit|undo|redo/.test(label)) return;
+        var isRetryNumber = false;
+        try{
+          var row = el.closest && el.closest('div.is_Row');
+          if (row && row.querySelector && row.querySelector('div.is_Button')) isRetryNumber = true;
+        }catch(_){ }
+        if (!/continue|take a turn|retry|erase|send|submit|generate|edit|undo|redo|select/.test(label) && !isRetryNumber) return;
 
         var c0 = _aidt_countOutputs();
         var t0 = _aidt_totalText();
         var ran = false;
+        try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
         function _try(){
           var c = _aidt_countOutputs();
           var t = _aidt_totalText();
-          if (c > c0 || t > t0 + 80){
+          // Trigger when output count changes OR total text changes in any direction
+          if (c !== c0 || t !== t0){
             if (!ran){
               ran = true;
+              try{ window.__AIDT_PAUSE__ = false; }catch(_){ }
               _aidt_call('reparse');
               _aidt_call('reapply');
+              try{ if (window.__AIDT_CORE__ && typeof window.__AIDT_CORE__.ensure==='function') window.__AIDT_CORE__.ensure(); }catch(_){}
+              try{ [120,300,600,1000,1600,2500].forEach(function(ms){ setTimeout(function(){ if (window.__AIDT_CORE__ && typeof window.__AIDT_CORE__.ensure==='function') window.__AIDT_CORE__.ensure(); }, ms); }); }catch(_){}
             }
           }
         }
@@ -1990,10 +2390,14 @@ for (var b=0;b<doBlocks.length;b++){
         });
         setTimeout(function(){
           if (!ran){
+            try{ window.__AIDT_PAUSE__ = false; }catch(_){ }
             _aidt_call('reparse');
             _aidt_call('reapply');
+            try{ if (window.__AIDT_CORE__ && typeof window.__AIDT_CORE__.ensure==='function') window.__AIDT_CORE__.ensure(); }catch(_){}
+            try{ [120,300,600,1000,1600,2500].forEach(function(ms){ setTimeout(function(){ if (window.__AIDT_CORE__ && typeof window.__AIDT_CORE__.ensure==='function') window.__AIDT_CORE__.ensure(); }, ms); }); }catch(_){}
           }
         }, 8000);
+        setTimeout(function(){ try{ window.__AIDT_PAUSE__ = false; }catch(_){ } }, 2000);
       }catch(_){}
     }, true);
 

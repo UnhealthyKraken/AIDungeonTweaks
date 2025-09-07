@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.5 – 2025-09-07
+- Added: Italics (unquoted) style with its own Bold/Colour settings, separate from Internal Monologue.
+- Added: Colour preset dropdowns for Do, Say, Main Text, Speech, Internal Monologue, and Italics.
+- Added: ALL CAPS exclusions list (e.g., HQ, CEO, NASA) with instant apply; chips UI for add/remove.
+- Fixed: Overlay sync with split-word layer (game-backdrop-saturate) to ensure newest paragraph reflects changes.
+- Fixed: Latest paragraph targeting to prefer the newest overlay/copy elements.
+- Fixed: Quoted speech misclassified as Internal Monologue when preceded by a trailing *; tightened IM detection to single-line and boundary-aware.
+- Fixed: Stray IM placeholder producing empty golden quotes (“”); ignore empty/whitespace IM captures.
+- Fixed: Locale strings with apostrophes (French) escaped to remove linter errors.
+- Fixed: Keyword “Custom Color…” flow; color picker persists and restyles existing keyword spans immediately.
+- Changed: Moved ALL CAPS exclusions UI under All Caps Effects section; updated labels to include new Italics section.
+
 ## 1.4.0 – 2025-09-07
 - Changed: Full rewrite from browser extension to userscript (Tampermonkey/Violentmonkey).
 - Changed: Distribution via raw GitHub URLs with `@downloadURL`/`@updateURL`; auto‑updates handled by the manager.
