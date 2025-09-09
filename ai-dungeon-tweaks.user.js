@@ -53,7 +53,10 @@
     backgroundType: 'default',
     bgColour: '#111827',
     bgOpacity: 50,
-    languageOverride: 'default'
+    languageOverride: 'default',
+
+    // Site integration
+    aiModel: ''
   };
 
   const clone = o => JSON.parse(JSON.stringify(o));
@@ -363,11 +366,12 @@
 
   // Speech: plain quotes but not IM (supports straight and curly quotes)
   let reSpeechStraight, reSpeechCurly;
-  try { reSpeechStraight = new RegExp('(?<!\\*)"([^"\\n]+?)"(?!\\*)','g'); }
-  catch { reSpeechStraight = /(^|[^*])"([^"\n]+?)"(?=[^*]|$)/g; }
-  // Curly quotes " ..."
-  try { reSpeechCurly = new RegExp('(?<!\\*)"([^"]\\n]+)"?(?!\\*)','g'); }
-  catch { reSpeechCurly = /(^|[^*])"([^"\n]+)"?(?=[^*]|$)/g; }
+  // Require at least 2 non-space chars inside and no leading/trailing space; also block numeric inch marks (e.g., 5'8" or 3").
+  try { reSpeechStraight = new RegExp('(?<![\\*0-9\'])\"(?!\s)([^\"\\n]{2,}?)(?<!\s)\"(?!\\*)','g'); }
+  catch { reSpeechStraight = /(^|[^*0-9'])\"(?!\s)([^\"\n]{2,}?)(?<!\s)\"(?=[^*]|$)/g; }
+  // Curly quotes — same numeric guard
+  try { reSpeechCurly = new RegExp('(?<![\\*0-9\'])\"(?!\s)([^\"\\n]{2,}?)(?<!\s)\"(?!\\*)','g'); }
+  catch { reSpeechCurly = /(^|[^*0-9'])\"(?!\s)([^\"\n]{2,}?)(?<!\s)\"(?=[^*]|$)/g; }
 
   const reStrike  = /~~(?=\S)(.+?)(?<=\S)~~/g;
   const reCode    = /`([^`]+?)`/g;
@@ -437,27 +441,32 @@
     out = replaceOutsideTags(out, reIMOpenOnlyClose,      (_, inner)=>'*"' + inner + '"*');
     // 2) Per-line conservative auto-closing:
     try{
-      const fixLine = (line)=>{
-        const t = line.trimStart();
-        // Close lone starting *text → *text*
-        if (t.startsWith('*')){
-          const rest = t.slice(1);
-          if (rest.indexOf('*') === -1) return line + '*';
-        }
-        // Close lone starting _text → _text_
-        if (t.startsWith('_')){
-          const rest = t.slice(1);
-          if (rest.indexOf('_') === -1) return line + '_';
-        }
-        // Close speech only if the line has odd number of straight quotes
-        const straightCount = (line.match(/"/g)||[]).length;
-        if (/^\s*"/.test(line) && (straightCount % 2 === 1)) return line + '"';
-        // Close curly speech only if odd number of curly quotes
-        const curlyCount = (line.match(/"/g)||[]).length;
-        if (/^\s*"/.test(line) && (curlyCount % 2 === 1)) return line + '"';
-        return line;
-      };
-      out = out.split(/\n/).map(fixLine).join('\n');
+      // Only apply per-line auto-closing when handling multi-line content.
+      // This avoids appending stray quotes to short per-word overlay tokens.
+      if (/\n/.test(out)){
+        const fixLine = (line)=>{
+          const t = line.trimStart();
+          // Close lone starting *text → *text*
+          if (t.startsWith('*')){
+            const rest = t.slice(1);
+            if (rest.indexOf('*') === -1) return line + '*';
+          }
+          // Close lone starting _text → _text_
+          if (t.startsWith('_')){
+            const rest = t.slice(1);
+            if (rest.indexOf('_') === -1) return line + '_';
+          }
+          // Close speech only if the line has odd number of straight quotes
+          const straightCount = (line.match(/\"/g)||[]).length;
+          if (/^\s*\"/.test(line) && (straightCount % 2 === 1)) return line + '"';
+          // Close curly speech only if odd number of curly quotes (use real curly chars)
+          const curlyCountL = (line.match(/[“]/g)||[]).length;
+          const curlyCountR = (line.match(/[”]/g)||[]).length;
+          if (/^[\s]*[“]/.test(line) && ((curlyCountL + curlyCountR) % 2 === 1)) return line + '”';
+          return line;
+        };
+        out = out.split(/\n/).map(fixLine).join('\n');
+      }
     }catch(_){ }
 
     // Placeholders for IM so Speech pass cannot catch them
@@ -494,12 +503,13 @@
     if (settings.rSpeechWeight){
       const spStyle = 'color:' + (settings.speech.colour || '#ffffff') + ';' +
                       (settings.speech.bold ? 'font-weight:700;' : '');
+      const shouldWrapSpeech = (t)=>{ try{ const s=(t||'').trim(); if (s.length<6) return false; if (/\s/.test(s)) return true; if (/[.!?]$/.test(s)) return true; return false; }catch(_){ return true; } };
       const straightHasPrefix = reSpeechStraight.source.indexOf('(^|[^*])') === 0;
       const curlyHasPrefix    = reSpeechCurly.source.indexOf('(^|[^*])') === 0;
-      if (straightHasPrefix) out = replaceOutsideTags(out, reSpeechStraight, (m, pre, inner)=>(pre||'') + wrap('"' + inner + '"','aidt-speech', spStyle));
-      else                   out = replaceOutsideTags(out, reSpeechStraight, (_, inner)=>wrap('"' + inner + '"','aidt-speech', spStyle));
-      if (curlyHasPrefix)    out = replaceOutsideTags(out, reSpeechCurly,    (m, pre, inner)=>(pre||'') + wrap('"' + inner + '"','aidt-speech', spStyle));
-      else                   out = replaceOutsideTags(out, reSpeechCurly,    (_, inner)=>wrap('"' + inner + '"','aidt-speech', spStyle));
+      if (straightHasPrefix) out = replaceOutsideTags(out, reSpeechStraight, (m, pre, inner)=>(pre||'') + (shouldWrapSpeech(inner) ? wrap('"' + inner + '"','aidt-speech', spStyle) : m));
+      else                   out = replaceOutsideTags(out, reSpeechStraight, (_, inner)=> (shouldWrapSpeech(inner) ? wrap('"' + inner + '"','aidt-speech', spStyle) : '"'+inner+'"'));
+      if (curlyHasPrefix)    out = replaceOutsideTags(out, reSpeechCurly,    (m, pre, inner)=>(pre||'') + (shouldWrapSpeech(inner) ? wrap('"' + inner + '"','aidt-speech', spStyle) : m));
+      else                   out = replaceOutsideTags(out, reSpeechCurly,    (_, inner)=> (shouldWrapSpeech(inner) ? wrap('"' + inner + '"','aidt-speech', spStyle) : '"'+inner+'"'));
     }
 
     // Keywords (phrases supported) with per-keyword effect/bold
@@ -666,6 +676,17 @@
   }
   function syncOverlayFromCopy(){
     try{
+      // Skip only when the OUTPUT paragraph itself is being edited, not when the input box is present
+      try{
+        var isEditingOutput = (function(){
+          try{
+            var ed = document.querySelector('[contenteditable="true"]');
+            if (!ed || !ed.closest) return false;
+            return !!ed.closest('#gameplay-output');
+          }catch(_){ return false; }
+        })();
+        if (isEditingOutput) return;
+      }catch(_){ }
       const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
       const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
       const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
@@ -707,6 +728,117 @@
     }catch(_){ }
   }
 
+  // Rebuild the split-word overlay row (transition-opacity / game-backdrop-saturate)
+  // directly from its own text so the newest paragraph shows AIDT spans immediately.
+  function rebuildOverlayFromOwnText(container){
+    try{
+      if (!container) return;
+      const isOverlayRow = (container.id && container.id==='transition-opacity') ||
+                           (container.querySelector && container.querySelector('#game-backdrop-saturate'));
+      if (!isOverlayRow) return;
+      // Do NOT rebuild action rows (they contain an #action-icon and special markup)
+      try{ if (container.querySelector && container.querySelector('#action-icon')) return; }catch(_){ }
+      const raw = txt(container) || '';
+      if (!raw) return;
+      const html = transformString(raw) || '';
+      if (html && container.innerHTML !== html){
+        container.innerHTML = html;
+        try{ applyInlineSpanStyles(); }catch(_){ }
+        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+        dbg('rebuildOverlayFromOwnText: overlay rebuilt from its own text');
+      }
+    }catch(_){ }
+  }
+
+  // Overlay speech wrapper: scan per-word '#game-backdrop-saturate' spans and wrap
+  // ranges between quote characters into a parent '.aidt-speech' span so coloring
+  // applies without changing the tokenization.
+  function overlayWrapSpeech(container){
+    try{
+      if (!container) return;
+      const hasOverlay = (container.id && container.id==='transition-opacity') ||
+                         (container.querySelector && container.querySelector('#game-backdrop-saturate'));
+      if (!hasOverlay) return;
+      // Avoid duplicating wrappers on repeated passes
+      try{ container.querySelectorAll('.aidt-speech').forEach(n=>{ try{
+        // If the wrapper only contains overlay tokens, unwrap it first
+        const tokens = n.querySelectorAll('#game-backdrop-saturate');
+        if (tokens && tokens.length){ while(n.firstChild) n.parentNode.insertBefore(n.firstChild, n); n.remove(); }
+      }catch(_){ } }); }catch(_){ }
+
+      const tokens = Array.from(container.querySelectorAll('#game-backdrop-saturate'));
+      if (!tokens.length) return;
+      // Build a map of quote positions across tokens
+      const quotePositions = [];
+      let prevLastChar = '';
+      for (let i=0;i<tokens.length;i++){
+        const t = tokens[i].textContent || '';
+        for (let c=0;c<t.length;c++){
+          const ch = t[c];
+          if (ch === '"'){
+            const prevChar = (c>0) ? t[c-1] : prevLastChar;
+            // Ignore numeric inch quotes like 5'8" or 3" screws
+            if (prevChar && /[0-9]/.test(prevChar)) { continue; }
+            quotePositions.push({token:i, offset:c});
+          }
+        }
+        prevLastChar = t ? t[t.length-1] : '';
+      }
+      if (quotePositions.length < 2) return;
+      // Pair quotes in order: (0,1), (2,3), ...
+      for (let p=0; p+1<quotePositions.length; p+=2){
+        const a = quotePositions[p].token;
+        const b = quotePositions[p+1].token;
+        // Always wrap the inclusive range [a..b] — short utterances like "No." are valid speech
+        // Wrap inclusive range [a..b]
+        try{
+          const wrapper = document.createElement('span');
+          wrapper.className = 'aidt aidt-speech';
+          // Insert before first token
+          const first = tokens[a];
+          if (!first || !first.parentNode) continue;
+          first.parentNode.insertBefore(wrapper, first);
+          for (let k=a;k<=b;k++){
+            if (!tokens[k]) continue;
+            wrapper.appendChild(tokens[k]);
+          }
+        }catch(_){ }
+      }
+      try{ applyInlineSpanStyles(); }catch(_){ }
+    }catch(_){ }
+  }
+
+  // Debounced, re-entrancy guarded overlay normalizer/wrapper to avoid observer loops
+  function ensureOverlayWrappedOnce(root){
+    try{
+      if (window.__AIDT_OVERLAY_WRAP_SCHEDULED__) return;
+      window.__AIDT_OVERLAY_WRAP_SCHEDULED__ = true;
+      setTimeout(function(){
+        try{
+          window.__AIDT_OVERLAY_WRAP_SCHEDULED__ = false;
+          var ol = ql('#gameplay-output #transition-opacity, #transition-opacity', root) || ql('#transition-opacity');
+          if (!ol) return;
+          // Skip action rows; only apply speech wrapping + styles on them
+          try{
+            if (ol.querySelector && ol.querySelector('#action-icon')){
+              try{ overlayWrapSpeech(ol); }catch(_ow1){}
+              try{ applyInlineSpanStyles(); }catch(_as1){}
+              return;
+            }
+          }catch(_sk){}
+          if (window.__AIDT_OVERLAY_LOCK__) return; // prevent re-entry
+          window.__AIDT_OVERLAY_LOCK__ = true;
+          try{ normalizeOverlay(); }catch(_no){}
+          try{ overlayWrapSpeech(ol); }catch(_ow){}
+          try{ applyInlineSpanStyles(); }catch(_as){}
+        }catch(_){
+        }finally{
+          try{ window.__AIDT_OVERLAY_LOCK__ = false; }catch(_f){}
+        }
+      }, 50);
+    }catch(_){ }
+  }
+
   // Rebuild visible paragraphs from plain text so caps/keyword rules re-evaluate instantly
   function rebuildVisibleParagraphs(){
     try{
@@ -720,8 +852,28 @@
   // Stronger overlay normalizer: rebuild overlay from the plain text of the copy container
   function normalizeOverlay(){
     try{
+      // Skip only while editing the output paragraph itself
+      try{
+        var isEditingOutput = (function(){
+          try{
+            var ed = document.querySelector('[contenteditable="true"]');
+            if (!ed || !ed.closest) return false;
+            return !!ed.closest('#gameplay-output');
+          }catch(_){ return false; }
+        })();
+        if (isEditingOutput) return;
+      }catch(_){ }
       const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
       if (!overlay) return;
+      // If this overlay is an action row, avoid flattening its structure. Only wrap speech and restyle.
+      try{
+        if (overlay.querySelector && overlay.querySelector('#action-icon')){
+          try{ overlayWrapSpeech(overlay); }catch(_ow){}
+          try{ applyInlineSpanStyles(); }catch(_as){}
+          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_sd){}
+          return;
+        }
+      }catch(_){ }
       const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
       const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
       const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
@@ -750,7 +902,7 @@
     try{
       const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
       if (!overlay) return;
-      const rebalance = debounce(()=>{ try{ normalizeOverlay(); }catch(_){ } }, 80);
+      const rebalance = debounce(()=>{ try{ normalizeOverlay(); try{ const ol=ql('#gameplay-output #transition-opacity, #transition-opacity'); if (ol) overlayWrapSpeech(ol); }catch(_){ } }catch(_){ } }, 80);
       const mo = new MutationObserver(function(muts){
         for (var i=0;i<muts.length;i++){
           var m=muts[i];
@@ -894,6 +1046,7 @@
         // First, run the normal node-by-node transform
         dbg('parseLatestOutput: running parseWithinRoot on preferred');
         parseWithinRoot(preferred, true);
+        try{ rebuildOverlayFromOwnText(preferred); overlayWrapSpeech(preferred); }catch(_){ }
         // Ensure styles apply immediately on the newest paragraph
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline'); }catch(_e){}
         try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do'); } }catch(_e){}
@@ -923,7 +1076,7 @@
           const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!textEl.querySelector('.aidt-im');
           if (speechHidden || imHidden) retransformFromTextContent(textEl);
         }catch(_){ }
-        try{ syncOverlayFromCopy(); }catch(_){ }
+        try{ syncOverlayFromCopy(); ensureOverlayWrappedOnce(preferred); }catch(_){ }
         return;
       }
       const els=document.querySelectorAll(LATEST_SELECTORS);
@@ -950,6 +1103,7 @@
       const latest=els[els.length-1];
       dbg('parseLatestOutput: running parseWithinRoot on latest');
       parseWithinRoot(latest, true);
+      try{ rebuildOverlayFromOwnText(latest); overlayWrapSpeech(latest); ensureOverlayWrappedOnce(latest); }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (no preferred)'); }catch(_e){}
       try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (no preferred)'); } }catch(_e){}
       try{
@@ -972,7 +1126,7 @@
       try{
         const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
         const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
-        if (speechHidden || imHidden) retransformFromTextContent(textEl);
+        if (speechHidden || imHidden){ retransformFromTextContent(textEl); try{ ensureOverlayWrappedOnce(); }catch(_){ } }
       }catch(_){ }
       try{ syncOverlayFromCopy(); normalizeOverlay(); }catch(_){ }
     }catch{}
@@ -989,6 +1143,14 @@
       __aidt_debugDumpLatest(container || textEl, textEl);
       if (!textEl) return;
       try{ parseWithinRoot(container || textEl, true); dbg('ensureLatestFormatted: parseWithinRoot ok'); }catch(_e0){ dbgw('ensureLatestFormatted: parseWithinRoot error', _e0); }
+      // Guarantee inline spans exist on the newest element immediately
+      try{
+        const rawNow = txt(textEl)||'';
+        if (rawNow && !(textEl.innerHTML||'').match(/class=\"aidt/)){
+          const htmlNow = transformString(rawNow);
+          if (htmlNow && htmlNow !== rawNow){ textEl.innerHTML = htmlNow; }
+        }
+      }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
       try{
         const hasSpans = !!(textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
@@ -1465,18 +1627,19 @@
     if (panelAPI) return panelAPI;
 
     const host=document.createElement('div');
-    host.style.all='initial'; host.style.position='fixed'; host.style.right='18px'; host.style.bottom='18px'; host.style.zIndex='2147483647';
+    host.style.all='initial'; host.style.position='fixed'; host.style.right='18px'; host.style.bottom='18px'; host.style.zIndex='2147483647'; host.style.pointerEvents='none';
     document.documentElement.appendChild(host);
     const root=host.attachShadow({mode:'open'});
 
     const style=document.createElement('style');
     style.textContent =
-      ':host{all:initial;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}' +
-      '.btn{all:initial;display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;padding:10px 12px;border-radius:999px;border:1px solid rgba(148,163,184,.35);background:#1e2430;color:#e5e7eb;font:500 13px system-ui}' +
+      ':host{all:initial;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;pointer-events:none}' +
+      '.btn{all:initial;display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;padding:10px 12px;border-radius:999px;border:1px solid rgba(148,163,184,.35);background:#1e2430;color:#e5e7eb;font:500 13px system-ui;pointer-events:auto}' +
       '.btn:hover{background:#1b2230}' +
       '.btn,.ghost,.reset,.tab{transition:transform .12s ease, filter .12s ease}' +
       '.btn:active,.ghost:active,.reset:active,.tab:active{transform:translateY(1px) scale(.98);filter:brightness(.92)}' +
       '.panel{all:initial;position:fixed;right:0;bottom:46px;width:520px;max-width:95vw;max-height:78vh;border-radius:14px;border:1px solid rgba(148,163,184,.35);background:#252b36;color:#e5e7eb;backdrop-filter:blur(6px);box-shadow:0 10px 30px rgba(0,0,0,.45);display:none;overflow:hidden;font:13px system-ui}' +
+      '@media (max-width: 640px){ .btn{ position: fixed; right: 12px; bottom: 92px; z-index: 2147483647; } }' +
       '.panel.open{display:block}' +
       '.header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(51,65,85,.6);position:relative}' +
       '.header-actions{display:flex;align-items:center;gap:10px}' +
@@ -1510,7 +1673,9 @@
       '.chip button{all:initial;cursor:pointer;border:1px solid rgba(148,163,184,.35);border-radius:8px;padding:2px 6px;color:#e5e7eb;background:#0f1622}';
     root.appendChild(style);
 
-    const btn=document.createElement('button'); btn.className='btn'; btn.textContent='AIDT ⚙️'; root.appendChild(btn);
+    const btn=document.createElement('button'); btn.className='btn'; btn.textContent='AIDT ⚙️'; btn.style.pointerEvents='auto'; root.appendChild(btn);
+    // Nudge button when overlapping input action row on mobile
+    try{ if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches){ btn.style.position='fixed'; btn.style.right='12px'; btn.style.bottom='92px'; btn.style.zIndex='2147483647'; } }catch(_){ }
 
     const panel=document.createElement('div'); panel.className='panel';
     panel.innerHTML =
@@ -1623,6 +1788,10 @@
           '<div class="row"><span>'+T('Backdrop opacity')+'</span><input id="rng-bg-opacity" type="range" min="0" max="100" step="1"/><button id="rst-bg-opacity" class="reset" title="'+T('Reset')+'">↺</button></div>' +
         '</div>' +
 
+        '<div class="group"><h4>'+T('AI Model')+'</h4>' +
+          '<div class="row"><span>'+T('Model')+'</span><select id="dd-ai-model"></select><button id="btn-ai-refresh" class="reset" title="'+T('Refresh')+'">⟳</button></div>' +
+        '</div>' +
+
         '<div class="group"><h4>'+T('Language')+'</h4>' +
           '<div class="row"><span>'+T('Language override')+'</span><select id="dd-lang"><option value="default">'+T('Default')+'</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="es">Español</option><option value="it">Italiano</option><option value="pt-BR">Português (Brasil)</option><option value="pt">Português</option><option value="tr">Türkçe</option><option value="pl">Polski</option><option value="ru">Русский</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh-CN">简体中文</option><option value="zh">中文</option><option value="ar">العربية</option><option value="hi">हिन्दी</option><option value="id">Bahasa Indonesia</option></select><span></span></div>' +
         '</div>' +
@@ -1640,6 +1809,55 @@
       '</section>' +
       '</div>';
     root.appendChild(panel);
+
+    // Try to mount a second AIDT button in the site navbar (next to #game-blur-button)
+    (function(){
+      function mountNavBtn(){
+        try{
+          if (document.getElementById('aidt-nav-button')) return; // already mounted
+          const blur = document.querySelector('#game-blur-button');
+          if (!blur || !blur.parentElement) return;
+          const navBtn = document.createElement('div');
+          navBtn.id = 'aidt-nav-button';
+          // Borrow styling from the blur button so it matches the navbar
+          try{ navBtn.className = blur.className || ''; }catch(_){ }
+          // Minimal fallback styles if class copy fails
+          navBtn.style.cursor='pointer'; navBtn.style.display='flex'; navBtn.style.alignItems='center'; navBtn.style.justifyContent='center';
+          navBtn.setAttribute('title','AI Dungeon Tweaks');
+          navBtn.setAttribute('aria-label','AI Dungeon Tweaks');
+          // Icon-only label to match other navbar buttons
+          try{
+            navBtn.textContent='';
+            const ic=document.createElement('span');
+            // Use a distinct icon to avoid confusion with the site's gear
+            ic.textContent='🧩';
+            ic.style.fontSize='18px';
+            ic.style.lineHeight='1';
+            ic.style.display='inline-flex';
+            ic.style.alignItems='center';
+            ic.style.justifyContent='center';
+            ic.setAttribute('aria-hidden','true');
+            navBtn.appendChild(ic);
+          }catch(_){ }
+          // Toggle panel on click
+          navBtn.addEventListener('click', function(ev){ try{ ev.preventDefault(); ev.stopPropagation(); panel.classList.toggle('open'); }catch(_e){} });
+          // Place as the last item (far right in the flex row)
+          try{ navBtn.style.order = '9999'; blur.parentElement.appendChild(navBtn); }catch(_i){}
+          // If navbar button exists, hide the floating FAB entirely to avoid duplicates
+          try{ btn.style.display='none'; }catch(_){ }
+        }catch(_){ }
+      }
+      // Attempt mounts a few times as the navbar renders
+      mountNavBtn();
+      setTimeout(mountNavBtn, 200);
+      setTimeout(mountNavBtn, 800);
+      setTimeout(mountNavBtn, 2000);
+      // Also watch for SPA nav changes
+      try{
+        const mo = new MutationObserver(()=>mountNavBtn());
+        mo.observe(document.body, {childList:true, subtree:true});
+      }catch(_){ }
+    })();
 
     const $ = sel=>panel.querySelector(sel);
     const setSwitch=(el,on)=>{ if(el){ el.setAttribute('data-on', on?'true':'false'); el.setAttribute('title', on?T('Disable'):T('Enable')); } };
@@ -1677,6 +1895,96 @@
       Object.keys(profiles.profiles).sort().forEach(name=>{
         const o=document.createElement('option'); o.value=name; o.textContent=name; dd.appendChild(o);
       });
+    };
+
+    // --- AI Model discovery and application ---
+    const normalizeModelName = (s)=>{ try{ return String(s||'').trim().replace(/\s+/g,' '); }catch(_){ return ''; } };
+    const discoverAiModels = ()=>{
+      try{
+        const results = new Set();
+
+        const collectFromBox = (box)=>{
+          try{
+            const nodes = box.querySelectorAll('[role="option"], [aria-selected], [data-value], [data-id], li, button, div, span, a');
+            for (let i=0;i<nodes.length;i++){
+              const n = nodes[i];
+              const txt = normalizeModelName(n && (n.getAttribute('data-value') || n.getAttribute('data-id') || n.textContent) || '');
+              if (!txt) continue;
+              if (txt.length > 80) continue;
+              if (!/[A-Za-z0-9]/.test(txt)) continue;
+              results.add(txt);
+            }
+          }catch(_){ }
+        };
+
+        // 0) Direct known id (provided by user/XPath)
+        try{ const ex=document.getElementById(':r6vt:'); if (ex) collectFromBox(ex); }catch(_e0){}
+
+        // 0b) Any similar ephemeral id that looks like ":r...:" and has the viewport class
+        try{
+          const maybe = document.querySelectorAll('[id^=":r"][id$=":"].is_SelectViewport');
+          for (let i=0;i<maybe.length;i++) collectFromBox(maybe[i]);
+        }catch(_e0b){}
+
+        // 1) Class used by the site's select viewport
+        document.querySelectorAll('.is_SelectViewport').forEach(collectFromBox);
+
+        // 2) Any floating listbox/popover that looks like a dropdown
+        document.querySelectorAll('[role="listbox"]').forEach(function(lb){
+          try{
+            lb.querySelectorAll('[role="option"]').forEach(function(n){
+              const txt = normalizeModelName(n.textContent||'');
+              if (txt) results.add(txt);
+            });
+          }catch(_l){}
+        });
+
+        const arr = Array.from(results);
+        // Heuristic: prefer items that resemble model names if the list is large
+        const modelHint = /gpt|claude|llama|llm|mixtral|gemini|nai|novel|dragon|griffin|phoenix|hydra|turbo|flash|sonnet|opus/i;
+        const hinted = arr.filter(x=>modelHint.test(x));
+        return (hinted.length>=2 ? hinted : arr).slice(0, 200);
+      }catch(_){ return []; }
+    };
+    const openModelMenuIfNeeded = ()=>{
+      try{
+        // Try clicking a trigger that controls a listbox/select
+        const triggers = document.querySelectorAll('[aria-haspopup="listbox"], [role="combobox"], [data-testid*="model" i], button, [role="button"]');
+        for (let i=0;i<triggers.length;i++){
+          const el = triggers[i];
+          const t  = (el.textContent||'').toLowerCase();
+          if (/model|gpt|claude|llama|mixtral|gemini|novel/i.test(t)) { try{ el.click(); return true; }catch(_c){} }
+        }
+      }catch(_){ }
+      return false;
+    };
+    const applyAiModelSelection = (name)=>{
+      try{
+        const target = normalizeModelName(name||''); if (!target) return false;
+        const tryClickOption = ()=>{
+          // Prefer explicit id if present, then other containers
+          const containers = [];
+          try{ const ex=document.getElementById(':r6vt:'); if (ex) containers.push(ex); }catch(_){ }
+          containers.push.apply(containers, Array.from(document.querySelectorAll('.is_SelectViewport, [role="listbox"]')));
+          for (let c=0;c<containers.length;c++){
+            const box = containers[c];
+            const opts = box.querySelectorAll('[role="option"], button, div, span, a');
+            for (let j=0;j<opts.length;j++){
+              const o = opts[j];
+              const txt = normalizeModelName(o.textContent||'');
+              if (txt===target){ try{ o.click(); return true; }catch(_cl){} }
+            }
+          }
+          return false;
+        };
+        if (tryClickOption()) return true;
+        if (openModelMenuIfNeeded()){
+          setTimeout(tryClickOption, 50);
+          setTimeout(tryClickOption, 200);
+          setTimeout(tryClickOption, 500);
+        }
+      }catch(_){ }
+      return false;
     };
 
     const refreshUI=()=>{
@@ -1735,6 +2043,20 @@
       if (opRow){ if (($('#dd-bg-type').value||'default')==='backdrop'){ opRow.classList.remove('is-disabled'); } else { opRow.classList.add('is-disabled'); } }
       $('#dd-lang').value = settings.languageOverride || 'default';
 
+      // AI Model
+      try{
+        const ddAi=$('#dd-ai-model'); if (ddAi){
+          const models = discoverAiModels();
+          ddAi.innerHTML = '';
+          if (models.length===0){
+            const o=document.createElement('option'); o.value=''; o.textContent=T('None found'); ddAi.appendChild(o);
+          } else {
+            models.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; ddAi.appendChild(o); });
+          }
+          if (settings.aiModel){ ddAi.value = settings.aiModel; }
+        }
+      }catch(_){ }
+
       rebuildProfileDropdown(); $('#dd-profile').value = activeName;
     };
 
@@ -1792,21 +2114,24 @@
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(1) span:first-child','Background type');
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(2) span:first-child','Background colour');
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(3) span:first-child','Backdrop opacity');
-      // Misc → Language
-      setText('section[data-section="misc"] .group:nth-of-type(2) h4','Language');
-      setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Language override');
+      // Misc → AI Model
+      setText('section[data-section="misc"] .group:nth-of-type(2) h4','AI Model');
+      setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Model');
+      // Misc → Language (shifted to 3 after AI Model)
+      setText('section[data-section="misc"] .group:nth-of-type(3) h4','Language');
+      setText('section[data-section="misc"] .group:nth-of-type(3) .row:nth-of-type(1) span:first-child','Language override');
       // Misc → Profiles
-      setText('section[data-section"misc"] .group:nth-of-type(3) h4','Profiles');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .row:nth-of-type(1) span:first-child','Profile');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-save-as','Save as new');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-rename','Rename');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-duplicate','Duplicate');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-delete','Delete');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-bind','Bind to this story');
-      setText('section[data-section="misc"] .group:nth-of-type(3) .actions button#pf-unbind','Unbind');
+      setText('section[data-section"misc"] .group:nth-of-type(4) h4','Profiles');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .row:nth-of-type(1) span:first-child','Profile');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-save-as','Save as new');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-rename','Rename');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-duplicate','Duplicate');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-delete','Delete');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-bind','Bind to this story');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-unbind','Unbind');
       // Export/Import buttons
-      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#btn-export','Export');
-      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#btn-import','Import');
+      setText('section[data-section="misc"] .group:nth-of-type(5) .actions button#btn-export','Export');
+      setText('section[data-section="misc"] .group:nth-of-type(5) .actions button#btn-import','Import');
       // Reset All
       setText('section[data-section="misc"] > .actions button#reset-all','Reset All');
       // Update switch titles
@@ -1843,6 +2168,8 @@
       settings.bgColour       = $('#sel-bg-colour').value || '#111827';
       settings.bgOpacity      = parseInt($('#rng-bg-opacity').value,10);
       settings.languageOverride = $('#dd-lang').value || 'default';
+      // Persist selected AI model (does not force selection on page here)
+      settings.aiModel = ($('#dd-ai-model') && $('#dd-ai-model').value) || settings.aiModel || '';
     };
 
     const bindReset=(id,fn)=>{ const el=$('#'+id); if(!el) return; el.addEventListener('click',()=>{ fn(); refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); }); };
@@ -1878,11 +2205,18 @@
     });
 
     // selects/inputs → instant
-    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','dd-lang','dd-profile'].forEach(id=>{
+    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','dd-lang','dd-profile','dd-ai-model'].forEach(id=>{
       const el=$('#'+id); if(!el) return;
       el.addEventListener('input',  applyLive);
       el.addEventListener('change', applyLive);
     });
+
+    // AI Model specific hooks
+    (function(){
+      const dd=$('#dd-ai-model'); const rf=$('#btn-ai-refresh');
+      if (rf) rf.addEventListener('click', ()=>{ try{ openModelMenuIfNeeded(); setTimeout(()=>refreshUI(), 120); }catch(_){ refreshUI(); } });
+      if (dd) dd.addEventListener('change', ()=>{ try{ const name=dd.value||''; if (name) { applyAiModelSelection(name); } }catch(_){ } });
+    })();
 
     // Keyword add: button and Enter key
     const kwInput=$('#tf-keyword-input');
@@ -2050,6 +2384,11 @@
       // Ensure font/spacing + base text styles are applied to newly added roots
       try{ applyFontsAndEffects(); applyBaseText(); retrofitAllCapsAndKeywords(); applyInlineSpanStyles(); }catch(_e){}
       AIDT_applySayDo(document);
+      // Ensure the newest overlay row has our span classes after settings changes
+      try{
+        var ol = document.querySelector('#gameplay-output #transition-opacity, #transition-opacity');
+        if (ol){ try{ normalizeOverlay(); }catch(_no){} try{ overlayWrapSpeech(ol); }catch(_ow){} }
+      }catch(_ens){}
       try{
         var ifr = document.querySelectorAll('iframe');
         for (var i=0;i<ifr.length;i++){
@@ -2077,10 +2416,10 @@
       // Apply base text immediately on load
       try{ applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
       // Force an initial latest parse-and-style sweep after first paint, then apply background last
-      try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
+      try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
       observer.observe(document.body, { childList:true, subtree:true, characterData:true });
       // Begin watching the overlay to normalize split-word spans continuously
-      try{ setupOverlayObserver(); normalizeOverlay(); }catch(_){ }
+      try{ setupOverlayObserver(); /* normalizeOverlay intentionally deferred to avoid wiping newest before spans */ }catch(_){ }
       // Toggle debug: Ctrl+Alt+D
       try{
         window.addEventListener('keydown', function(e){

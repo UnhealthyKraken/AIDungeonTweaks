@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.6 – 2025-09-09
+- Changed: Moved the AIDT button into the top navbar (next to Settings). The floating button now auto‑hides on mobile to avoid covering text or the send button. The navbar control uses a distinct 🧩 icon.
+- Fixed: Emoji/special characters no longer break parsing/formatting in the newest paragraph.
+- Fixed: Say/Do rows keep their coloring/weight after erasing the following model reply.
+- Fixed: Quote detection refined so heights/measurements like 5'8" or 3" aren’t treated as dialogue.
+- Fixed: Newest‑paragraph speech wrapping on the overlay is more robust and avoids mutation loops/freezes.
+
 ## 1.4.5 – 2025-09-07
 - Added: Italics (unquoted) style with its own Bold/Colour settings, separate from Internal Monologue.
 - Added: Colour preset dropdowns for Do, Say, Main Text, Speech, Internal Monologue, and Italics.
