@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.7.1
+// @version      1.4.8
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -42,6 +42,7 @@
     lineHeight: 1.5,
     letterSpacing: 0,            // em
     textAlign: 'default',
+    paragraphs: 'default', // default|basic|newline
 
     internalMonologue: { bold: false, colour: '#9ca3af' }, // *"..."*
     italics:           { bold: false, colour: '#facc15' }, // *text* (unquoted)
@@ -53,6 +54,8 @@
     backgroundType: 'default',
     bgColour: '#111827',
     bgOpacity: 50,
+    bgImageUrl: '',
+    bgImageInFront: false,
     languageOverride: 'default',
 
     // Site integration
@@ -326,6 +329,8 @@
       return !!(r && r.length && r[0].width>0 && r[0].height>0);
     }catch{ return true; }
   };
+  const isWithinEditable = el => { try{ return !!(el && el.closest && el.closest('[contenteditable="true"]')); }catch{ return false; } };
+  const isEditingActive = ()=>{ try{ const ed=document.querySelector('[contenteditable="true"]'); if(!ed||!ed.closest) return false; return !!(ed.closest('#gameplay-output')||ed.closest('#transition-opacity')||ed.closest('#do-not-copy')); }catch(_){ return false; } };
   const hasVisibleDesc = (root, selector)=>{
     try{
       const list = root && root.querySelectorAll ? root.querySelectorAll(selector) : [];
@@ -460,9 +465,9 @@
           const straightCount = (line.match(/\"/g)||[]).length;
           if (/^\s*\"/.test(line) && (straightCount % 2 === 1)) return line + '"';
           // Close curly speech only if odd number of curly quotes (use real curly chars)
-          const curlyCountL = (line.match(/[“]/g)||[]).length;
-          const curlyCountR = (line.match(/[”]/g)||[]).length;
-          if (/^[\s]*[“]/.test(line) && ((curlyCountL + curlyCountR) % 2 === 1)) return line + '”';
+          const curlyCountL = (line.match(/[""]/g)||[]).length;
+          const curlyCountR = (line.match(/[""]/g)||[]).length;
+          if (/^[\s]*[""]/.test(line) && ((curlyCountL + curlyCountR) % 2 === 1)) return line + '"';
           return line;
         };
         out = out.split(/\n/).map(fixLine).join('\n');
@@ -717,9 +722,10 @@
   function retransformFromTextContent(el){
     try{
       if (!el) return;
-      const text = txt(el) || '';
+      const text = getBaselineTextFor(el, txt(el) || '');
       if (!text) return;
-      const html = transformString(text);
+      const textP = applyParagraphsToText(text);
+      const html = transformString(textP);
       if (html && html !== text){
         el.innerHTML = html;
         try{ applyInlineSpanStyles(); }catch(_){ }
@@ -738,9 +744,10 @@
       if (!isOverlayRow) return;
       // Do NOT rebuild action rows (they contain an #action-icon and special markup)
       try{ if (container.querySelector && container.querySelector('#action-icon')) return; }catch(_){ }
-      const raw = txt(container) || '';
+      const raw = getBaselineTextFor(container, txt(container) || '');
       if (!raw) return;
-      const html = transformString(raw) || '';
+      let html = transformString(applyParagraphsToText(raw)) || '';
+      try{ html = applyParagraphsToHTML(html); }catch(_){ }
       if (html && container.innerHTML !== html){
         container.innerHTML = html;
         try{ applyInlineSpanStyles(); }catch(_){ }
@@ -845,20 +852,33 @@
       const preferred=document.getElementById('gameplay-output');
       const nodes = preferred ? preferred.querySelectorAll(LATEST_SELECTORS) : document.querySelectorAll(LATEST_SELECTORS);
       if (!nodes || !nodes.length) return;
-      nodes.forEach(n=>{ try{ const t=pickTextElement(n); if(t) retransformFromTextContent(t); }catch(_){ } });
+      nodes.forEach(n=>{
+        try{
+          const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
+          if (isOverlayRow){
+            try{ rebuildOverlayFromOwnText(n); }catch(_ro){}
+            try{ overlayWrapSpeech(n); }catch(_ow){}
+            try{ applyInlineSpanStyles(); }catch(_as){}
+            return;
+          }
+          const t=pickTextElement(n); if(!t) return; const raw=txt(t)||''; if(!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; applyInlineSpanStyles(); }
+        }catch(_){ }
+      });
     }catch(_){ }
   }
 
   // Stronger overlay normalizer: rebuild overlay from the plain text of the copy container
   function normalizeOverlay(){
     try{
+      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       // Skip only while editing the output paragraph itself
       try{
         var isEditingOutput = (function(){
           try{
             var ed = document.querySelector('[contenteditable="true"]');
             if (!ed || !ed.closest) return false;
-            return !!ed.closest('#gameplay-output');
+            // Skip normalization if the active editor is within gameplay output or overlay containers
+            return !!(ed.closest('#gameplay-output') || ed.closest('#transition-opacity'));
           }catch(_){ return false; }
         })();
         if (isEditingOutput) return;
@@ -877,9 +897,10 @@
       const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
       const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
       const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
-      const text = txt(source) || '';
+      const text = getBaselineTextFor(source, txt(source) || '');
       if (!text) return;
-      const html = transformString(text) || '';
+      let html = transformString(applyParagraphsToText(text)) || '';
+      try{ html = applyParagraphsToHTML(html); }catch(_){ }
       if (html && overlay.innerHTML !== html){
         overlay.innerHTML = html;
         try{ applyInlineSpanStyles(); }catch(_){ }
@@ -902,24 +923,69 @@
     try{
       const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
       if (!overlay) return;
-      const rebalance = debounce(()=>{ try{ normalizeOverlay(); try{ const ol=ql('#gameplay-output #transition-opacity, #transition-opacity'); if (ol) overlayWrapSpeech(ol); }catch(_){ } }catch(_){ } }, 80);
+      const rebalance = debounce(()=>{ try{ if (window.__AIDT_PAUSE__) return; normalizeOverlay(); try{ const ol=ql('#gameplay-output #transition-opacity, #transition-opacity'); if (ol) overlayWrapSpeech(ol); }catch(_){ } }catch(_){ } }, 80);
       const mo = new MutationObserver(function(muts){
         for (var i=0;i<muts.length;i++){
           var m=muts[i];
-          if (m.type==='childList' || m.type==='characterData' || m.type==='attributes'){ rebalance(); break; }
+          if (m.type==='childList' || m.type==='characterData'){ rebalance(); break; }
         }
       });
-      mo.observe(overlay, {childList:true, subtree:true, characterData:true, attributes:true});
+      mo.observe(overlay, {childList:true, subtree:true, characterData:true});
       try{
         const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
-        if (saturate) mo.observe(saturate, {childList:true, subtree:true, characterData:true, attributes:true});
+        if (saturate) mo.observe(saturate, {childList:true, subtree:true, characterData:true});
       }catch(_){ }
       try{ window.__AIDT_OVERLAY_OBSERVER__ = mo; }catch(_){ }
+    }catch(_){ }
+  }
+
+  // Normalize all overlay rows at once (play.aidungeon multiple paragraphs)
+  function bulkNormalizeOverlays(){
+    try{
+      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
+      // Temporarily disconnect observer to avoid loops
+      try{ if (window.__AIDT_OVERLAY_OBSERVER__) window.__AIDT_OVERLAY_OBSERVER__.disconnect(); }catch(_){ }
+      const list = document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity');
+      const nearestCopyFor = (overlay)=>{
+        try{
+          let n = overlay.previousElementSibling;
+          while(n){ if (n.id==='do-not-copy') return n; n=n.previousElementSibling; }
+          n = overlay.nextElementSibling;
+          while(n){ if (n.id==='do-not-copy') return n; n=n.nextElementSibling; }
+          const scope = (overlay.parentNode && overlay.parentNode.querySelector) ? overlay.parentNode : document;
+          const local = scope.querySelector('#do-not-copy'); if (local) return local;
+        }catch(_){ }
+        return document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
+      };
+      for (let i=0;i<list.length;i++){
+        const overlay = list[i];
+        try{
+          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) continue;
+          const localCopy = nearestCopyFor(overlay);
+          const source = (function(){ try{ const el=localCopy? (pickTextElement(localCopy)||localCopy):overlay; return el; }catch(_){ return overlay; } })();
+          let text = getBaselineTextFor(source, txt(source)||'');
+          if (!text){ text = getBaselineTextFor(overlay, txt(overlay)||''); }
+          if (!text) continue;
+          let html = transformString(applyParagraphsToText(text)) || '';
+          try{ html = applyParagraphsToHTML(html); }catch(_){ }
+          if (html && overlay.innerHTML !== html){
+            overlay.innerHTML = html;
+            try{ applyInlineSpanStyles(); }catch(_){ }
+            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+          }
+        }catch(_){ }
+      }
+      // Re-attach observer after batch
+      try{ setupOverlayObserver(); }catch(_){ }
+      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; }catch(__){} }
     }catch(_){ }
   }
   const parseWithinRoot = (root, force)=>{
     if (!settings.enabled || !root || isDanger(root)) return;
     try{ if (!force && window.__AIDT_PAUSE__) return; }catch(_){ }
+    // Do not parse inside a live contenteditable to preserve editing interactions
+    try{ if (!force && isWithinEditable(root)) return; }catch(_){ }
     const kwEnabled=(settings.textFormatting.keywords||[]).length>0;
     const capsEnabled=!!(settings.allCapsEffect && settings.allCapsEffect!=='None');
     const subtree = txt(root);
@@ -930,6 +996,7 @@
           try{
             const p=node.parentNode; if(!p) return NodeFilter.FILTER_REJECT;
             if (p.closest('input,textarea,script,style,template,code,pre')) return NodeFilter.FILTER_REJECT;
+            if (p.closest('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
             if (p.closest('.aidt')) return NodeFilter.FILTER_REJECT;
             if (hasScript(p)) return NodeFilter.FILTER_REJECT;
             // Allow formatting even when nodes are contenteditable; we still exclude inputs/textarea above
@@ -956,10 +1023,18 @@
           (container.id && container.id==='transition-opacity') ||
           (container.querySelector && container.querySelector('#game-backdrop-saturate'))
         )){
-          const alt = document.querySelector('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay');
+          let alt=null;
+          try{
+            const scope = (container.parentNode && container.parentNode.querySelector) ? container.parentNode : document;
+            const localCopy = scope.querySelector('#do-not-copy');
+            if (localCopy){ alt = localCopy.querySelector('span.font_gameplay, p.font_gameplay, div.font_gameplay'); }
+          }catch(_){ }
+          if (!alt){ alt = document.querySelector('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay'); }
           if (alt) return alt;
           // Fallback: use the copy container itself if a specific child wasn't found
-          const copy = document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
+          const copy = (container.parentNode && container.parentNode.querySelector) ? (container.parentNode.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #do-not-copy, #do-not-copy')) : document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
+          // If copy container is currently being edited, return it directly (avoid replacing HTML while typing)
+          try{ if (copy && copy.querySelector && copy.querySelector('[contenteditable="true"]')) return copy; }catch(_){ }
           if (copy) return copy;
         }
       }catch(_){ }
@@ -968,6 +1043,8 @@
         const el=candidates[i];
         // Skip split-word overlay nodes
         if (el.querySelector && el.querySelector('#game-backdrop-saturate')) continue;
+        // Prefer non-editable nodes for formatting; if editable, skip
+        try{ if (el.closest && el.closest('[contenteditable="true"]')) continue; }catch(_){ }
         if (el.closest && !el.hasAttribute('aria-hidden')) return el;
       }
       return candidates[0] || container;
@@ -991,7 +1068,7 @@
   function finalizeLatestOnce(textEl){
     try{
       if (!textEl || AIDT_FINALIZED.has(textEl)) return;
-      const t = txt(textEl) || '';
+      const t = getBaselineTextFor(textEl, txt(textEl));
       if (!t || t.length < 2) return;
       dbg('finalizeLatestOnce: running on node, len=', t.length);
       // Prefer transforming existing HTML so split nodes are handled
@@ -1040,6 +1117,8 @@
   const parseLatestOutput = ()=>{
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      // If user is actively editing, avoid re-rendering the newest paragraph to preserve caret/clicks
+      try{ if (isEditingActive()) return; }catch(_){ }
       const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity') || document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]');
       dbg('parseLatestOutput: preferred=', !!preferred);
       if (preferred){
@@ -1058,13 +1137,14 @@
           applyBaseTextToElement(textEl);
           const hasIMSpan = !!textEl.querySelector('.aidt-im');
           const hasSpeechSpan = !!textEl.querySelector('.aidt-speech');
-          const text = txt(textEl);
-          const hasIMPattern = /\*(?:"|")[\s\S]*?(?:"|")\*/.test(text);
+          const text = getBaselineTextFor(textEl, txt(textEl));
+          const hasIMPattern = /\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(text);
           const hasSpeechPattern = /(["][^"\n]+["])/.test(text);
           dbg('parseLatestOutput: spans(im,speech)=', hasIMSpan, hasSpeechSpan, 'patterns(im,speech)=', hasIMPattern, hasSpeechPattern);
           dbg('parseLatestOutput: child visibility=', {im: hasVisibleDesc(textEl,'.aidt-im'), speech: hasVisibleDesc(textEl,'.aidt-speech')});
           if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
-            const html = transformString(text);
+            let html = transformString(applyParagraphsToText(text));
+            try{ html = applyParagraphsToHTML(html); }catch(_){ }
             if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
           } else if (!hasVisibleDesc(textEl,'.aidt-im')) {
             finalizeLatestOnce(textEl);
@@ -1084,16 +1164,17 @@
       if (!els || !els.length){
         const fallbackEl = findLatestTextEl();
         if (!fallbackEl) return;
-        parseWithinRoot(fallbackEl, true);
+        try{ if (!isEditingActive()) parseWithinRoot(fallbackEl, true); }catch(_){ }
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (fallback)'); }catch(_e){}
         try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (fallback)'); } }catch(_e){}
         try{
           const textEl = fallbackEl;
           const hasSpeechSpans = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
-          const text = txt(textEl);
-          dbg('parseLatestOutput: hasSpeechSpans=', hasSpeechSpans, 'markers=', /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(text));
-          if (!hasSpeechSpans && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(text)){
-            const html = transformString(text);
+          const text = getBaselineTextFor(textEl, txt(textEl));
+          dbg('parseLatestOutput: hasSpeechSpans=', hasSpeechSpans, 'markers=', /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(text));
+          if (!hasSpeechSpans && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(text)){
+            let html = transformString(applyParagraphsToText(text));
+            try{ html = applyParagraphsToHTML(html); }catch(_){ }
             dbg('parseLatestOutput: transformed=', html!==text);
             if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
           }
@@ -1102,7 +1183,7 @@
       }
       const latest=els[els.length-1];
       dbg('parseLatestOutput: running parseWithinRoot on latest');
-      parseWithinRoot(latest, true);
+      try{ if (!isEditingActive()) parseWithinRoot(latest, true); }catch(_){ }
       try{ rebuildOverlayFromOwnText(latest); overlayWrapSpeech(latest); ensureOverlayWrappedOnce(latest); }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (no preferred)'); }catch(_e){}
       try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (no preferred)'); } }catch(_e){}
@@ -1112,11 +1193,12 @@
         applyBaseTextToElement(textEl);
         const hasIMSpan = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
         const hasSpeechSpan = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
-        const text = txt(textEl);
-        const hasIMPattern = /\*(?:"|")[\s\S]*?(?:"|")\*/.test(text);
+        const text = getBaselineTextFor(textEl, txt(textEl));
+        const hasIMPattern = /\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(text);
         const hasSpeechPattern = /(["][^"\n]+["])/.test(text);
         if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
-          const html = transformString(text);
+          let html = transformString(applyParagraphsToText(text));
+          try{ html = applyParagraphsToHTML(html); }catch(_){ }
           if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
         } else if (!hasVisibleDesc(textEl,'.aidt-im')) {
           finalizeLatestOnce(textEl);
@@ -1136,6 +1218,7 @@
   function ensureLatestFormatted(){
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      try{ if (isEditingActive()) return; }catch(_){ }
       const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
       const container = preferred || null;
       const textEl = container ? pickTextElement(container) : (findLatestTextEl() || null);
@@ -1154,9 +1237,9 @@
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
       try{
         const hasSpans = !!(textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
-        const t = txt(textEl);
-        dbg('ensureLatestFormatted: hasSpans=', hasSpans, 'len=', (t||'').length, 'markers=', /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(t));
-        if (!hasSpans && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(t)){
+        const t = getBaselineTextFor(textEl, txt(textEl));
+        dbg('ensureLatestFormatted: hasSpans=', hasSpans, 'len=', (t||'').length, 'markers=', /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(t));
+        if (!hasSpans && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(t)){
           const html = transformString(t);
           dbg('ensureLatestFormatted: transformed=', html!==t);
           if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
@@ -1176,24 +1259,33 @@
   const formatAllTargetElements = ()=>{
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
       const preferred = document.getElementById('gameplay-output');
       if (preferred){
         const nodes = preferred.querySelectorAll(LATEST_SELECTORS);
-        nodes.forEach(n=>{ const t=pickTextElement(n); parseWithinRoot(t, true); });
+        nodes.forEach(n=>{
+          try{
+            const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
+            if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
+            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; }
+          }catch(_){ }
+        });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
         try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); } }catch(_e){}
       } else {
         const nodes = document.querySelectorAll(LATEST_SELECTORS);
-        nodes.forEach(n=>{ const t=pickTextElement(n); parseWithinRoot(t, true); });
+        nodes.forEach(n=>{
+          try{
+            const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
+            if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
+            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; }
+          }catch(_){ }
+        });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
         try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); } }catch(_e){}
       }
-      try{
-        // Mark the last matched node for clarity
-        const last = document.querySelector('#gameplay-output #transition-opacity, #transition-opacity');
-        if (last){ __aidt_debugDumpLatest(last, pickTextElement(last)); __aidt_debugMarkLatest(last, pickTextElement(last)); }
-        syncOverlayFromCopy();
-      }catch(_){ }
+      try{ bulkNormalizeOverlays(); }catch(_){ }
+      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; }catch(__){} }
     }catch{}
   };
 
@@ -1209,10 +1301,10 @@
         if (!candidate || candidate===latestTarget) return;
         if (latestMo) { try{ latestMo.disconnect(); }catch(_){}; latestMo=null; }
         latestTarget=candidate;
-        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
+        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
         latestMo.observe(latestTarget,{childList:true,subtree:true,characterData:true});
         // Immediate pass on attach
-        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|")[\s\S]*?(?:"|")\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
+        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
       }catch(_){ }
     };
     const flush=()=>{
@@ -1297,10 +1389,75 @@
   const BG_CONTAINERS=['#gameplay-saturate','#__next','body','#transition-opacity'];
   let BG_APPLIED_ONCE=false;
 
+  function ensureAmbienceSuppressed(){
+    try{
+      const imgs = Array.prototype.slice.call(document.querySelectorAll('#gameplay-saturate img, #__next img[alt="Ambience"]'));
+      imgs.forEach(function(img){
+        try{
+          if (!img) return;
+          img.setAttribute('data-aidt-ambience-disabled','1');
+          try{ if (!img.getAttribute('data-aidt-ambience-orig-src') && img.src){ img.setAttribute('data-aidt-ambience-orig-src', img.src); } }catch(_save){}
+          try{ img.style.setProperty('display','none','important'); }catch(_d){}
+          try{ img.style.setProperty('opacity','0','important'); }catch(_o){}
+          try{ img.style.setProperty('visibility','hidden','important'); }catch(_v){}
+        }catch(_each){}
+      });
+    }catch(_){ }
+  }
+
+  function ensureAmbienceVisible(){
+    try{
+      const imgs = Array.prototype.slice.call(document.querySelectorAll('#gameplay-saturate img, #__next img[alt="Ambience"]'));
+      imgs.forEach(function(img){
+        try{
+          try{ img.style.removeProperty('display'); }catch(_rd){}
+          try{ img.style.removeProperty('opacity'); }catch(_ro){}
+          try{ img.style.removeProperty('visibility'); }catch(_rv){}
+          try{ img.removeAttribute('data-aidt-ambience-disabled'); }catch(_ra){}
+          try{ const orig=img.getAttribute('data-aidt-ambience-orig-src'); if(orig){ img.src=orig; img.removeAttribute('data-aidt-ambience-orig-src'); } }catch(_rs){}
+        }catch(_each){}
+      });
+    }catch(_){ }
+  }
+
+  function attachAmbienceObserver(){
+    try{
+      if (window.__AIDT_AMBIENCE_OBSERVER__) return;
+      const root = document.body;
+      if (!root) return;
+      const mo = new MutationObserver(function(){
+        try{ ensureAmbienceSuppressed(); }catch(_){ }
+      });
+      mo.observe(root, { childList:true, subtree:true, attributes:true, attributeFilter:['src','srcset','style','class'] });
+      window.__AIDT_AMBIENCE_OBSERVER__ = mo;
+    }catch(_){ }
+  }
+
+  function updateAmbienceCss(shouldHide){
+    try{
+      let tag=document.getElementById('aidt-ambience-hide');
+      if (!shouldHide){ if (tag) tag.remove(); return; }
+      if (!tag){ tag=document.createElement('style'); tag.id='aidt-ambience-hide'; document.head.appendChild(tag); }
+      tag.textContent = ''+
+        ' #gameplay-saturate img{display:none!important;visibility:hidden!important;opacity:0!important}' +
+        ' #__next img[alt="Ambience"]{display:none!important;visibility:hidden!important;opacity:0!important}';
+    }catch(_){ }
+  }
+
+  function detachAmbienceObserver(){
+    try{
+      if (window.__AIDT_AMBIENCE_OBSERVER__){
+        try{ window.__AIDT_AMBIENCE_OBSERVER__.disconnect(); }catch(_d){}
+        try{ delete window.__AIDT_AMBIENCE_OBSERVER__; }catch(_del){}
+      }
+    }catch(_){ }
+  }
+
   const applyBackground = ()=>{
     const type=settings.backgroundType||'default';
     const colour=settings.bgColour||'#111827';
     const opacityPct = (typeof settings.bgOpacity==='number'?settings.bgOpacity:50);
+    const imgUrl=(settings.bgImageUrl||'').trim();
     const clamp=(n)=> Math.max(0, Math.min(100, isNaN(n)?100:n));
     const o= clamp(opacityPct)/100;
     const rgbHexToRgba=(hex,alpha)=>{
@@ -1311,7 +1468,7 @@
     };
     const solidVal = colour;
     const backdropVal = rgbHexToRgba(colour,o);
-    const val= (type==='solid') ? solidVal : (type==='backdrop'?backdropVal:'');
+    const val= (type==='solid') ? solidVal : (type==='backdrop'?backdropVal:(type==='image'?('url("'+imgUrl+'")[cover]') : ''));
     try{
       BG_CONTAINERS.forEach(sel=>{
         const el=qs(document,sel); if(!el) return;
@@ -1319,43 +1476,92 @@
           el.style.removeProperty('background'); el.style.removeProperty('background-color'); el.style.removeProperty('background-image');
           return;
         }
-        if(type==='backdrop' && (sel==='#gameplay-saturate' || sel==='#transition-opacity')){
-          // Skip overlay containers for backdrop mode
+        if (type==='image' && !!settings.bgImageInFront){
+          // Global CSS will handle overlay clearing; apply image on the topmost overlay containers for front display
+          if (sel==='#transition-opacity' || sel==='#gameplay-saturate'){
+            try{ el.style.setProperty('background-image', 'url("'+imgUrl+'")', 'important'); el.style.setProperty('background-size','cover','important'); el.style.setProperty('background-position','center center','important'); el.style.setProperty('background-repeat','no-repeat','important'); }catch(_){ }
+          } else {
+            el.style.removeProperty('background'); el.style.removeProperty('background-color'); el.style.removeProperty('background-image');
+          }
           return;
         }
-        el.style.setProperty('background', val, 'important');
-        el.style.setProperty('background-color', val, 'important');
-        if(type==='solid') el.style.setProperty('background-image', 'none', 'important');
-        else el.style.removeProperty('background-image');
+        if((type==='backdrop') || (type==='image' && !settings.bgImageInFront)){
+          // For backdrop and image-behind modes, overlays should be transparent; clear any previous solid styles
+          if (sel==='#gameplay-saturate' || sel==='#transition-opacity'){
+            try{ el.style.removeProperty('background'); }catch(_rb){}
+            try{ el.style.removeProperty('background-color'); }catch(_rbc){}
+            try{ el.style.removeProperty('background-image'); }catch(_rbi){}
+            return;
+          }
+        }
+        if(type==='image'){
+          try{ el.style.removeProperty('background'); }catch(_rmB){}
+          try{ el.style.setProperty('background-color','transparent','important'); }catch(_bc){}
+          try{ el.style.setProperty('background-image', 'url("'+imgUrl+'")', 'important'); el.style.setProperty('background-size','cover','important'); el.style.setProperty('background-position','center center','important'); el.style.setProperty('background-repeat','no-repeat','important'); }catch(_){ }
+        } else {
+          el.style.setProperty('background', val, 'important');
+          el.style.setProperty('background-color', val, 'important');
+          if(type==='solid') el.style.setProperty('background-image', 'none', 'important');
+          else el.style.removeProperty('background-image');
+        }
       });
     }catch(_){ }
+    // After applying backgrounds, suppress ambience image when needed
+    try{ if (type==='solid' || (type==='image' && !!settings.bgImageInFront)){ ensureAmbienceSuppressed(); attachAmbienceObserver(); } }catch(_){ }
     try{
       if (type==='default'){
         document.documentElement.style.removeProperty('background');
         document.documentElement.style.removeProperty('background-color');
         document.documentElement.style.removeProperty('background-image');
       } else {
-        document.documentElement.style.setProperty('background', val, 'important');
-        document.documentElement.style.setProperty('background-color', val, 'important');
-        if(type==='solid') document.documentElement.style.setProperty('background-image', 'none', 'important');
-        else document.documentElement.style.removeProperty('background-image');
+        if (type==='image'){
+          try{
+            document.documentElement.style.removeProperty('background');
+            document.documentElement.style.removeProperty('background-color');
+            document.documentElement.style.setProperty('background-image','url("'+imgUrl+'")','important');
+            document.documentElement.style.setProperty('background-size','cover','important');
+            document.documentElement.style.setProperty('background-position','center center','important');
+            document.documentElement.style.setProperty('background-repeat','no-repeat','important');
+          }catch(_){ }
+        } else {
+          document.documentElement.style.setProperty('background', val, 'important');
+          document.documentElement.style.setProperty('background-color', val, 'important');
+          if(type==='solid') document.documentElement.style.setProperty('background-image', 'none', 'important');
+          else document.documentElement.style.removeProperty('background-image');
+        }
       }
     }catch(_){ }
     try{
       let tag=document.getElementById('aidt-bg-style');
-      if (type==='solid'){
+      if (type==='solid' || (type==='image' && !!settings.bgImageInFront)){
         if (!tag){ tag=document.createElement('style'); tag.id='aidt-bg-style'; document.head.appendChild(tag); }
-        tag.textContent = ''+
-          ':root{--aidt-bg:'+colour+'}' +
-          ' html,body,#__next,#gameplay-saturate,#transition-opacity{background:var(--aidt-bg)!important;background-color:var(--aidt-bg)!important;background-image:none!important}' +
-          ' html::before,html::after,body::before,body::after,#__next::before,#__next::after,#gameplay-saturate::before,#gameplay-saturate::after,#transition-opacity::before,#transition-opacity::after{background:var(--aidt-bg)!important;background-image:none!important}' +
-          ' #gameplay-saturate{filter:none!important}' +
-          ' #transition-opacity{filter:none!important}' +
-          ' #transition-opacity, #transition-opacity *{background:transparent!important;background-image:none!important}' +
-          ' #__next .t_sub_theme.is_Theme, #__next .is_LinearGradient, #__next [data-disable-theme="true"]{background:var(--aidt-bg)!important;background-image:none!important;opacity:1!important;filter:none!important}' +
-          ' #__next .t_sub_theme.is_Theme::before, #__next .t_sub_theme.is_Theme::after, #__next .is_LinearGradient::before, #__next .is_LinearGradient::after, #__next [data-disable-theme="true"]::before, #__next [data-disable-theme="true"]::after{background:var(--aidt-bg)!important;background-image:none!important}' +
-          ' #__next .t_sub_theme.is_Theme *, #__next .is_LinearGradient *, #__next [data-disable-theme="true"] *{background:transparent!important;background-image:none!important}' +
-          ' #gameplay-saturate img[alt="Ambience"], #__next img[alt="Ambience"]{display:none!important}';
+        if (type==='solid'){
+          tag.textContent = ''+
+            ':root{--aidt-bg:'+colour+'}' +
+            ' html,body,#__next,#gameplay-saturate,#transition-opacity{background:var(--aidt-bg)!important;background-color:var(--aidt-bg)!important;background-image:none!important}' +
+            ' html::before,html::after,body::before,body::after,#__next::before,#__next::after,#gameplay-saturate::before,#gameplay-saturate::after,#transition-opacity::before,#transition-opacity::after{background:var(--aidt-bg)!important;background-image:none!important}' +
+            ' #gameplay-saturate{filter:none!important}' +
+            ' #transition-opacity{filter:none!important}' +
+            ' #transition-opacity, #transition-opacity *{background:transparent!important;background-image:none!important}' +
+            ' #gameplay-saturate, #gameplay-saturate *{background:transparent!important;background-image:none!important}' +
+            ' #__next .t_sub_theme.is_Theme, #__next .is_LinearGradient, #__next [data-disable-theme="true"]{background:var(--aidt-bg)!important;background-image:none!important;opacity:1!important;filter:none!important}' +
+            ' #__next .t_sub_theme.is_Theme::before, #__next .t_sub_theme.is_Theme::after, #__next .is_LinearGradient::before, #__next .is_LinearGradient::after, #__next [data-disable-theme="true"]::before, #__next [data-disable-theme="true"]::after{background:var(--aidt-bg)!important;background-image:none!important}' +
+            ' #__next .t_sub_theme.is_Theme *, #__next .is_LinearGradient *, #__next [data-disable-theme="true"] *{background:transparent!important;background-image:none!important}' +
+            ' #gameplay-saturate img, #__next img[alt="Ambience"]{display:none!important}';
+        } else { // image in front of overlays
+          tag.textContent = ''+
+            ' html, body, #__next, #gameplay-saturate, #transition-opacity{background:transparent!important;background-image:none!important}' +
+            ' #gameplay-saturate{filter:none!important}' +
+            ' #transition-opacity{filter:none!important}' +
+            ' #transition-opacity *{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #gameplay-saturate *{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #__next .t_sub_theme.is_Theme, #__next .is_LinearGradient, #__next [data-disable-theme="true"]{background:transparent!important;background-image:none!important;background-color:transparent!important;opacity:1!important;filter:none!important}' +
+            ' #__next .t_sub_theme.is_Theme::before, #__next .t_sub_theme.is_Theme::after, #__next .is_LinearGradient::before, #__next .is_LinearGradient::after, #__next [data-disable-theme="true"]::before, #__next [data-disable-theme="true"]::after{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #__next .t_sub_theme.is_Theme *, #__next .is_LinearGradient *, #__next [data-disable-theme="true"] *{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #__next .css-175oi2r{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #__next ._h-100--337{background:transparent!important;background-image:none!important;background-color:transparent!important}' +
+            ' #gameplay-saturate img, #__next img[alt="Ambience"]{display:none!important}';
+        }
       } else { if (tag) tag.remove(); }
     }catch(_){ }
     BG_APPLIED_ONCE=true;
@@ -1364,7 +1570,9 @@
   function scheduleBackgroundApply(){
     try{
       if (BG_APPLIED_ONCE) return;
-      if ((settings.backgroundType||'default')!=='solid') return; // nothing to do
+      const type = (settings.backgroundType||'default');
+      if (type==='default') return; // nothing to do
+      if (type==='image' && !(settings.bgImageUrl||'').trim()) return;
       const uiReady = document.readyState==='complete';
       const hasTargets = !!document.querySelector('#gameplay-output, #do-not-copy, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
       if (uiReady && hasTargets){ applyBackground(); return; }
@@ -1582,6 +1790,168 @@
     }catch(_){ }
   };
 
+  // Paragraph formatting
+  function applyParagraphsToHTML(html){
+    try{
+      const mode=(settings.paragraphs||'default');
+      if (!html) return html;
+      if (mode==='default') return html;
+      // Work on text segments only, preserve tags
+      const parts=String(html).split(/(<[^>]+>)/g);
+      for (let i=0;i<parts.length;i++){
+        const seg=parts[i]; if (!seg || seg.charCodeAt(0)===60) continue;
+        const text=seg;
+        if (mode==='basic'){
+          // Ensure a blank line between paragraphs: collapse to single newlines then make double between blocks
+          // Normalize CRLF first
+          let t=text.replace(/\r\n/g,'\n');
+          // Ensure at least one blank line between blocks separated by a single newline if sentence end
+          t = t.replace(/([.!?]")?\s*\n(\s*)(?!\n)/g, function(m, endQuote){
+            // If the preceding char ends a sentence or quote, insert an extra newline
+            return (endQuote?endQuote:'')+"\n\n";
+          });
+          parts[i]=t;
+        } else if (mode==='newline'){
+          // Newline rules focused on quotes and asterisks:
+          // - Insert a blank line before each quote or IM block
+          // - Put the quote/IM itself on its own line
+          // - Only a single newline after a quote/IM before following narration
+          // - Do NOT split narration into per-sentence lines
+          let t=text.replace(/\r\n/g,'\n');
+          const imQuotedBuf=[]; // stores *"..."*
+          const imPlainBuf=[];  // stores *text*
+          // Protect IM markers so we can treat them like quotes
+          t = t.replace(/\*"([\s\S]*?)"\*/g, function(m){ imQuotedBuf.push(m); return '§IMQ§'+(imQuotedBuf.length-1)+'§'; });
+          t = t.replace(/\*(?=\S)([^*\n]+?)\*/g, function(m){ imPlainBuf.push(m); return '§IMP§'+(imPlainBuf.length-1)+'§'; });
+          const quoteRe=/["“][\s\S]*?["”]/g;
+          const tokens=[]; let idx=0; let m;
+          const pushNarrationParts=(chunk)=>{
+            if (!chunk) return;
+            // Split narration chunk further to isolate IM placeholders as standalone tokens
+            const parts=chunk.split(/(§IMQ§\d+§|§IMP§\d+§)/g);
+            for (let p of parts){
+              if (!p) continue;
+              if (/^§IMQ§\d+§$/.test(p)) tokens.push({type:'imq', text:p});
+              else if (/^§IMP§\d+§$/.test(p)) tokens.push({type:'imp', text:p});
+              else tokens.push({type:'text', text:p});
+            }
+          };
+          quoteRe.lastIndex=0;
+          while((m=quoteRe.exec(t))){
+            const pre=t.slice(idx, m.index);
+            if (pre) pushNarrationParts(pre);
+            tokens.push({type:'quote', text:m[0]});
+            idx=m.index + m[0].length;
+          }
+          const tail=t.slice(idx); if (tail) pushNarrationParts(tail);
+          // Build output with spacing rules
+          let outSeg='';
+          const appendBlankLineBefore=()=>{
+            if (outSeg.endsWith('\n\n')) return;
+            if (outSeg.endsWith('\n')) { outSeg += '\n'; return; }
+            if (outSeg) outSeg += '\n\n';
+          };
+          for (let iTok=0;iTok<tokens.length;iTok++){
+            const tok=tokens[iTok];
+            if (tok.type==='text'){
+              outSeg += tok.text; // preserve spaces in narration
+            } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
+              appendBlankLineBefore();
+              // Trim only ASCII spaces around the quote/IM text; keep non-breaking/invisible spaces
+              const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
+              outSeg += q + '\n'; // single newline after
+              // Ensure exactly one newline after quotes/IM by stripping leading ASCII newlines/spaces from next narration token
+              const next=tokens[iTok+1];
+              if (next && next.type==='text' && next.text){
+                next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+              }
+            }
+          }
+          // Restore IM placeholders
+          outSeg = outSeg
+            .replace(/§IMQ§(\d+)§/g, (_,k)=> imQuotedBuf[Number(k)] || '')
+            .replace(/§IMP§(\d+)§/g, (_,k)=> imPlainBuf[Number(k)] || '');
+          // Collapse 3+ newlines to two for safety
+          outSeg = outSeg.replace(/\n{3,}/g,'\n\n');
+          parts[i]=outSeg;
+        }
+      }
+      const out = parts.join('');
+      return out.indexOf('\n')>=0 ? out.replace(/\n/g,'<br/>') : out;
+    }catch(_){ return html; }
+  }
+
+  function applyParagraphsToText(text){
+    try{
+      const mode=(settings.paragraphs||'default');
+      if (!text || mode==='default') return text;
+      let s=String(text).replace(/\r\n/g,'\n');
+      if (mode==='basic'){
+        // Collapse 3+ newlines to single, then convert single to double
+        s = s.replace(/\n{3,}/g,'\n');
+        // Convert any single newline between non-empty lines into double
+        // First, collapse multiple newlines to two
+        s = s.replace(/\n{2,}/g,'\n\n');
+        // Then ensure any remaining single newline becomes double
+        s = s.replace(/([^\n])\n(?!\n)/g, '$1\n\n');
+        return s;
+      }
+      if (mode==='newline'){
+        // Quote/IM-focused line breaking; preserve narration spacing
+        const imQuotedBuf=[];  // stores *"..."*
+        const imPlainBuf=[];   // stores *text*
+        s = s.replace(/\*"([\s\S]*?)"\*/g, function(m){ imQuotedBuf.push(m); return '§IMQ§'+(imQuotedBuf.length-1)+'§'; });
+        s = s.replace(/\*(?=\S)([^*\n]+?)\*/g, function(m){ imPlainBuf.push(m); return '§IMP§'+(imPlainBuf.length-1)+'§'; });
+        const quoteRe=/["“][\s\S]*?["”]/g;
+        const tokens=[]; let idx=0; let m;
+        const pushNarrationParts=(chunk)=>{
+          if (!chunk) return;
+          const parts=chunk.split(/(§IMQ§\d+§|§IMP§\d+§)/g);
+          for (let p of parts){
+            if (!p) continue;
+            if (/^§IMQ§\d+§$/.test(p)) tokens.push({type:'imq', text:p});
+            else if (/^§IMP§\d+§$/.test(p)) tokens.push({type:'imp', text:p});
+            else tokens.push({type:'text', text:p});
+          }
+        };
+        quoteRe.lastIndex=0;
+        while((m=quoteRe.exec(s))){
+          const pre=s.slice(idx, m.index);
+          if (pre) pushNarrationParts(pre);
+          tokens.push({type:'quote', text:m[0]});
+          idx=m.index + m[0].length;
+        }
+        const tail=s.slice(idx); if (tail) pushNarrationParts(tail);
+        let out='';
+        const appendBlankLineBefore=()=>{
+          if (out.endsWith('\n\n')) return;
+          if (out.endsWith('\n')) { out += '\n'; return; }
+          if (out) out += '\n\n';
+        };
+        for (let iTok=0;iTok<tokens.length;iTok++){
+          const tok=tokens[iTok];
+          if (tok.type==='text'){
+            out += tok.text; // keep original narration spacing
+          } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
+            appendBlankLineBefore();
+            const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
+            out += q + '\n';
+            const next=tokens[iTok+1];
+            if (next && next.type==='text' && next.text){
+              next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+            }
+          }
+        }
+        out = out
+          .replace(/§IMQ§(\d+)§/g, (_,k)=> imQuotedBuf[Number(k)] || '')
+          .replace(/§IMP§(\d+)§/g, (_,k)=> imPlainBuf[Number(k)] || '')
+          .replace(/\n{3,}/g,'\n\n');
+        return out;
+      }
+      return text;
+    }catch(_){ return text; }
+  }
+
   // Retrofit pass: apply full transform to existing content (older paragraphs)
   const retrofitAllCapsAndKeywords = ()=>{
     try{
@@ -1617,7 +1987,18 @@
       try{ document.querySelectorAll('.aidt-speech, .aidt-im, .aidt-keyword, .aidt-allcaps').forEach(el=>{ try{ el.classList.remove('aidt-eff-Flash','aidt-eff-Strobe','aidt-eff-Rainbow','aidt-eff-Wave','aidt-eff-Breathe'); el.style.removeProperty('color'); el.style.removeProperty('font-weight'); el.style.removeProperty('animation'); el.style.removeProperty('filter'); el.style.removeProperty('transform'); }catch(_){ } }); }catch(_){ }
     }catch(_){ }
   }
-  const applyGlobal = ()=>{ if(!settings.enabled){ disableTweaks(); return; } applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); applyBackground(); };
+  const applyGlobal = ()=>{
+    if(!settings.enabled){ disableTweaks(); return; }
+    applyFontsAndEffects();
+    applyBaseText();
+    applyInlineSpanStyles();
+    const type=(settings.backgroundType||'default');
+    const hideAmbience = (type==='solid') || (type==='image');
+    updateAmbienceCss(hideAmbience);
+    applyBackground();
+    if (hideAmbience){ ensureAmbienceSuppressed(); attachAmbienceObserver(); }
+    else { ensureAmbienceVisible(); detachAmbienceObserver(); }
+  };
   const applyGlobalNoBG = ()=>{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); };
   const reapply     = debounce(applyGlobal, 50);
 
@@ -1774,6 +2155,7 @@
           '<div class="row"><span>'+T('Line Height')+'</span><input id="rng-line-height" type="range" min="1.1" max="2.0" step="0.05"/><button id="rst-line-height" class="reset" title="'+T('Reset')+'">↺</button></div>' +
           '<div class="row"><span>'+T('Letter Spacing')+'</span><input id="rng-letter-spacing" type="range" min="-0.05" max="0.2" step="0.005"/><button id="rst-letter-spacing" class="reset" title="'+T('Reset')+'">↺</button></div>' +
           '<div class="row"><span>'+T('Text Alignment')+'</span><select id="dd-text-align"><option value="default">Default</option><option value="left">Left</option><option value="justify">Justify</option></select><button id="rst-text-align" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Paragraphs')+'</span><select id="dd-paragraphs"><option value="default">Default</option><option value="basic">Basic</option><option value="newline">New Line</option></select><button id="rst-paragraphs" class="reset" title="'+T('Reset')+'">↺</button></div>' +
           '<div class="actions"><button id="rst-font-block" class="ghost">'+T('Reset Font')+'</button></div>' +
         '</div>' +
 
@@ -1783,9 +2165,10 @@
       // MISC
       '<section class="section" data-section="misc">' +
         '<div class="group"><h4>'+T('Background')+'</h4>' +
-          '<div class="row"><span>'+T('Background type')+'</span><select id="dd-bg-type"><option value="default">'+T('Default')+'</option><option value="backdrop">'+T('Backdrop (behind overlays)')+'</option><option value="solid">'+T('Solid (override overlays)')+'</option></select><button id="rst-bg-type" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row"><span>'+T('Background type')+'</span><select id="dd-bg-type"><option value="default">'+T('Default')+'</option><option value="backdrop">'+T('Backdrop (behind overlays)')+'</option><option value="solid">'+T('Solid (override overlays)')+'</option><option value="image">'+T('Custom image URL')+'</option></select><button id="rst-bg-type" class="reset" title="'+T('Reset')+'">↺</button></div>' +
           '<div class="row"><span>'+T('Background colour')+'</span><input id="sel-bg-colour" type="color"/><button id="rst-bg-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
           '<div class="row"><span>'+T('Backdrop opacity')+'</span><input id="rng-bg-opacity" type="range" min="0" max="100" step="1"/><button id="rst-bg-opacity" class="reset" title="'+T('Reset')+'">↺</button></div>' +
+          '<div class="row" id="row-bg-image" style="display:none"><span>Image URL</span><input id="tf-bg-image" type="text" placeholder="https://..."/><span></span></div>' +
         '</div>' +
 
         '<div class="group"><h4>'+T('AI Model')+'</h4>' +
@@ -2029,6 +2412,27 @@
       return false;
     };
 
+    function updateBgUiVisibility(){
+      try{
+        const type = ($('#dd-bg-type') && $('#dd-bg-type').value) || 'default';
+        const colorRow   = ($('#sel-bg-colour') && $('#sel-bg-colour').closest) ? $('#sel-bg-colour').closest('.row') : null;
+        const opacityRow = ($('#rng-bg-opacity') && $('#rng-bg-opacity').closest) ? $('#rng-bg-opacity').closest('.row') : null;
+        const imageRow   = $('#row-bg-image') || null;
+
+        // Default: hide color, hide opacity, hide image URL
+        // Backdrop: show color, show+enable opacity, hide image URL
+        // Solid: show color, hide opacity, hide image URL
+        // Image: hide color, hide opacity, show image URL
+        if (colorRow){ colorRow.style.display = (type==='backdrop' || type==='solid') ? '' : 'none'; }
+        if (opacityRow){
+          const showOpacity = (type==='backdrop');
+          opacityRow.style.display = showOpacity ? '' : 'none';
+          if (showOpacity){ opacityRow.classList.remove('is-disabled'); } else { opacityRow.classList.add('is-disabled'); }
+        }
+        if (imageRow){ imageRow.style.display = (type==='image') ? '' : 'none'; }
+      }catch(_){ }
+    }
+
     const refreshUI=()=>{
       setSwitch($('#sw-enabled'), !!settings.enabled);
       setSwitch($('#sw-do-bold'), !!settings.actions.do.bold);
@@ -2045,6 +2449,7 @@
       $('#rng-line-height').value = settings.lineHeight || 1.5;
       $('#rng-letter-spacing').value = settings.letterSpacing || 0;
       $('#dd-text-align').value = settings.textAlign || 'default';
+      try{ $('#dd-paragraphs').value = (settings.paragraphs||'default'); }catch(_){ }
 
       renderKeywordChips();
 
@@ -2080,9 +2485,9 @@
       $('#dd-bg-type').value = settings.backgroundType || 'default';
       $('#sel-bg-colour').value = settings.bgColour || '#111827';
       $('#rng-bg-opacity').value = (typeof settings.bgOpacity==='number'?settings.bgOpacity:100);
-      // Grey-out opacity row unless backdrop is selected
-      const opRow = $('#rng-bg-opacity') && $('#rng-bg-opacity').closest ? $('#rng-bg-opacity').closest('.row') : null;
-      if (opRow){ if (($('#dd-bg-type').value||'default')==='backdrop'){ opRow.classList.remove('is-disabled'); } else { opRow.classList.add('is-disabled'); } }
+      updateBgUiVisibility();
+      try{ const tfImg = $('#tf-bg-image'); if (tfImg){ tfImg.value = settings.bgImageUrl || ''; } }catch(_){ }
+      
       $('#dd-lang').value = settings.languageOverride || 'default';
 
       // AI Model
@@ -2149,6 +2554,7 @@
       setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(4) span:first-child','Line Height');
       setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(5) span:first-child','Letter Spacing');
       setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(6) span:first-child','Text Alignment');
+      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(7) span:first-child','Paragraphs');
       setText('section[data-section="format"] .group:nth-of-type(7) .actions button#rst-font-block','Reset Font');
       p.querySelectorAll('.reset').forEach(b=>{ try{ b.setAttribute('title', T('Reset')); }catch(_){ } });
       // Misc → Background
@@ -2156,6 +2562,9 @@
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(1) span:first-child','Background type');
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(2) span:first-child','Background colour');
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(3) span:first-child','Backdrop opacity');
+      // Background image row (shown when type=image)
+      setText('#row-bg-image span:first-child','Image URL');
+      
       // Misc → AI Model
       setText('section[data-section="misc"] .group:nth-of-type(2) h4','AI Model');
       setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Model');
@@ -2195,6 +2604,7 @@
       settings.lineHeight    = parseFloat($('#rng-line-height').value) || 1.5;
       settings.letterSpacing = parseFloat($('#rng-letter-spacing').value) || 0;
       settings.textAlign     = $('#dd-text-align').value || 'default';
+      settings.paragraphs    = ($('#dd-paragraphs') && $('#dd-paragraphs').value) || 'default';
 
       settings.textFormatting.mainText.bold   = getSwitch($('#sw-main-bold'));
       settings.textFormatting.mainText.colour = ($('#dd-main-presets').value || $('#sel-main-colour').value || '#ffffff');
@@ -2209,6 +2619,7 @@
       settings.backgroundType = $('#dd-bg-type').value || 'default';
       settings.bgColour       = $('#sel-bg-colour').value || '#111827';
       settings.bgOpacity      = parseInt($('#rng-bg-opacity').value,10);
+      settings.bgImageUrl     = ($('#tf-bg-image') && $('#tf-bg-image').value) || settings.bgImageUrl || '';
       settings.languageOverride = $('#dd-lang').value || 'default';
       // Persist selected AI model (does not force selection on page here)
       settings.aiModel = ($('#dd-ai-model') && $('#dd-ai-model').value) || settings.aiModel || '';
@@ -2223,17 +2634,19 @@
     bindReset('rst-line-height', ()=>{ settings.lineHeight=DEFAULTS.lineHeight; });
     bindReset('rst-letter-spacing', ()=>{ settings.letterSpacing=DEFAULTS.letterSpacing; });
     bindReset('rst-text-align',  ()=>{ settings.textAlign=DEFAULTS.textAlign; });
+    bindReset('rst-paragraphs',  ()=>{ settings.paragraphs=DEFAULTS.paragraphs; });
     bindReset('rst-main-colour', ()=>{ settings.textFormatting.mainText.colour=DEFAULTS.textFormatting.mainText.colour; });
     bindReset('rst-im-colour',   ()=>{ settings.internalMonologue.colour=DEFAULTS.internalMonologue.colour; applyInlineSpanStyles(); });
     bindReset('rst-it-colour',   ()=>{ settings.italics.colour=DEFAULTS.italics.colour; applyInlineSpanStyles(); });
     bindReset('rst-sp-colour',   ()=>{ settings.speech.colour=DEFAULTS.speech.colour; });
-    bindReset('rst-bg-type',     ()=>{ settings.backgroundType=DEFAULTS.backgroundType; });
+    bindReset('rst-bg-type',     ()=>{ settings.backgroundType=DEFAULTS.backgroundType; settings.bgImageUrl=''; });
     bindReset('rst-bg-colour',   ()=>{ settings.bgColour=DEFAULTS.bgColour; });
     bindReset('rst-bg-opacity',  ()=>{ settings.bgOpacity=DEFAULTS.bgOpacity; });
 
     $('#rst-font-block').addEventListener('click', ()=>{
       settings.fontFamily=DEFAULTS.fontFamily; settings.fontSize=DEFAULTS.fontSize; settings.fontWeight=DEFAULTS.fontWeight;
       settings.lineHeight=DEFAULTS.lineHeight; settings.letterSpacing=DEFAULTS.letterSpacing; settings.textAlign=DEFAULTS.textAlign;
+      settings.paragraphs=DEFAULTS.paragraphs;
       refreshUI(); translatePanel(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow();
     });
 
@@ -2247,11 +2660,17 @@
     });
 
     // selects/inputs → instant
-    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','dd-lang','dd-profile','dd-ai-model'].forEach(id=>{
+    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','dd-paragraphs','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','tf-bg-image','dd-lang','dd-profile','dd-ai-model'].forEach(id=>{
       const el=$('#'+id); if(!el) return;
       el.addEventListener('input',  applyLive);
       el.addEventListener('change', applyLive);
+      if (id==='dd-paragraphs'){
+        el.addEventListener('change', ()=>{ try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); bulkNormalizeOverlays(); }catch(_){ } });
+      }
     });
+
+    // Keep background controls visibility in sync with selection
+    try{ const ddBg=$('#dd-bg-type'); if (ddBg){ ddBg.addEventListener('change', ()=>{ updateBgUiVisibility(); }); } }catch(_){ }
 
     // AI Model specific hooks
     (function(){
@@ -2366,6 +2785,7 @@
     $('#rst-formatting').addEventListener('click', ()=>{
       settings.fontFamily=DEFAULTS.fontFamily; settings.fontSize=DEFAULTS.fontSize; settings.fontWeight=DEFAULTS.fontWeight;
       settings.lineHeight=DEFAULTS.lineHeight; settings.letterSpacing=DEFAULTS.letterSpacing; settings.textAlign=DEFAULTS.textAlign;
+      settings.paragraphs=DEFAULTS.paragraphs;
       settings.allCapsEffect=DEFAULTS.allCapsEffect;
       settings.textFormatting=clone(DEFAULTS.textFormatting);
       settings.internalMonologue=clone(DEFAULTS.internalMonologue);
@@ -2458,7 +2878,9 @@
       // Apply base text immediately on load
       try{ applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
       // Force an initial latest parse-and-style sweep after first paint, then apply background last
-      try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
+      try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); bulkNormalizeOverlays(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
+      // Also trigger a background apply a bit later in case UI finished mounting after our first attempt
+      try{ setTimeout(()=>{ try{ scheduleBackgroundApply(); }catch(_s2){} }, 450); }catch(_s1){}
       observer.observe(document.body, { childList:true, subtree:true, characterData:true });
       // Begin watching the overlay to normalize split-word spans continuously
       try{ setupOverlayObserver(); /* normalizeOverlay intentionally deferred to avoid wiping newest before spans */ }catch(_){ }
@@ -2490,6 +2912,27 @@
           }
         }catch(err){}
       }, true);
+
+      // Suppress formatting while the user is attempting to click/context‑click within the output
+      (function(){
+        let pauseTimer=null;
+        const doPause=(ms)=>{
+          try{
+            window.__AIDT_PAUSE__ = true;
+            if (pauseTimer) clearTimeout(pauseTimer);
+            pauseTimer = setTimeout(function(){ try{ window.__AIDT_PAUSE__ = false; ensureLatestFormatted(); }catch(_){ } }, ms||700);
+          }catch(_){ }
+        };
+        const shouldPause=(target)=>{
+          try{
+            if (!target || !target.closest) return false;
+            return !!(target.closest('#gameplay-output') || target.closest('#transition-opacity') || target.closest('#do-not-copy') || target.closest('[data-testid="adventure-text"]'));
+          }catch(_){ return false; }
+        };
+        document.addEventListener('pointerdown', function(ev){ try{ if (shouldPause(ev.target)) doPause(900); }catch(_){ } }, true);
+        document.addEventListener('contextmenu', function(ev){ try{ if (shouldPause(ev.target)) doPause(1200); }catch(_){ } }, true);
+        document.addEventListener('focusin', function(ev){ try{ if (ev.target && ev.target.closest && ev.target.closest('[contenteditable="true"]')) doPause(900); }catch(_){ } }, true);
+      })();
 
     }catch{}
   }
@@ -2800,3 +3243,15 @@ for (var b=0;b<doBlocks.length;b++){
   }catch(_){}
 })();
 /* ==== end AIDT robust handling ==== */
+
+// Baseline text storage for reversible paragraph formatting
+function getBaselineTextFor(el, current){
+  try{
+    if (!el) return current||'';
+    const attr = el.getAttribute && el.getAttribute('data-aidt-base-text');
+    if (attr != null) return String(attr);
+    const text = String(current||'');
+    try{ if (el.setAttribute) el.setAttribute('data-aidt-base-text', text); }catch(_){ }
+    return text;
+  }catch(_){ return String(current||''); }
+}

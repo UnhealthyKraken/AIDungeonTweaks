@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.8 – 2025-09-09
+- Added: Background “Image URL” mode (under Misc → Background). Paste any image URL to use it as the page background. The image option is applied immediately and persists per profile.
+- Added: Text Formatting → Font → Paragraphs setting (Default, Basic, New Line):
+  - Default: leave story text as-is.
+  - Basic: insert a blank line between paragraphs (keeps existing lines intact).
+  - New Line: place each sentence and each quoted line on its own line with a blank line between entries. Abbreviation-aware (e.g., “Mr.”, “Dr.”, “U.S.”, “a.m.”) and ignores ellipses, so it won’t split mid‑abbreviation.
+- Changed: Paragraphs option applies instantly and is reversible; switching modes re-renders the newest/visible output without a page refresh.
+
 ## 1.4.7.1 – 2025-09-09
 - Fixed: Compatibility on play.aidungeon.com – navbar mount now targets the correct Menu/Settings button when duplicates exist, preserves pointer events, and pins the AIDT control at the far right.
 - Changed: Separate Chrome vs Firefox handling for the navbar control (Chrome uses capture‑phase pointer handlers and debounce; Firefox uses a standard click), covering both play and beta domains.
