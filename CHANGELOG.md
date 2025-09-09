@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.7 – 2025-09-09
+- Changed: AIDT navbar button refined for Chrome/Firefox: true button element, keyboard support, capture‑phase handling and debounce to avoid double toggles; remains far‑right in the bar.
+- Fixed: Occasionally unclickable or double‑toggling navbar control in Chrome.
+
 ## 1.4.6 – 2025-09-09
 - Changed: Moved the AIDT button into the top navbar (next to Settings). The floating button now auto‑hides on mobile to avoid covering text or the send button. The navbar control uses a distinct 🧩 icon.
 - Fixed: Emoji/special characters no longer break parsing/formatting in the newest paragraph.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.6
+// @version      1.4.7
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -1817,14 +1817,18 @@
           if (document.getElementById('aidt-nav-button')) return; // already mounted
           const blur = document.querySelector('#game-blur-button');
           if (!blur || !blur.parentElement) return;
-          const navBtn = document.createElement('div');
+          const navBtn = document.createElement('button');
           navBtn.id = 'aidt-nav-button';
           // Borrow styling from the blur button so it matches the navbar
           try{ navBtn.className = blur.className || ''; }catch(_){ }
           // Minimal fallback styles if class copy fails
           navBtn.style.cursor='pointer'; navBtn.style.display='flex'; navBtn.style.alignItems='center'; navBtn.style.justifyContent='center';
+          navBtn.style.pointerEvents='auto';
+          navBtn.type='button';
           navBtn.setAttribute('title','AI Dungeon Tweaks');
           navBtn.setAttribute('aria-label','AI Dungeon Tweaks');
+          navBtn.setAttribute('role','button');
+          navBtn.setAttribute('tabindex','0');
           // Icon-only label to match other navbar buttons
           try{
             navBtn.textContent='';
@@ -1839,8 +1843,28 @@
             ic.setAttribute('aria-hidden','true');
             navBtn.appendChild(ic);
           }catch(_){ }
-          // Toggle panel on click
-          navBtn.addEventListener('click', function(ev){ try{ ev.preventDefault(); ev.stopPropagation(); panel.classList.toggle('open'); }catch(_e){} });
+          // Toggle panel on click/keyboard (Chrome may need capture + higher z-index)
+          let _lastToggleTs = 0;
+          function _toggle(ev){
+            try{
+              ev.preventDefault(); ev.stopPropagation(); if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+              const now = Date.now();
+              if (now - _lastToggleTs < 250) return; // debounce to avoid double toggles from multiple events
+              _lastToggleTs = now;
+              panel.classList.toggle('open');
+            }catch(_e){}
+          }
+          const ua=(navigator.userAgent||'').toLowerCase();
+          const isFirefox=/firefox/.test(ua);
+          const isChrome=/chrome/.test(ua) && !/edg|opr/.test(ua);
+          if (isChrome){
+            try{ navBtn.style.position='relative'; navBtn.style.zIndex='2147483647'; }catch(_){ }
+            // Use a single capture-phase pointerdown to beat parent handlers and avoid double fire
+            try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+          } else {
+            navBtn.addEventListener('click', _toggle, false);
+          }
+          navBtn.addEventListener('keydown', function(ev){ try{ if (ev.key==='Enter' || ev.key===' '){ _toggle(ev); } }catch(_e){} });
           // Place as the last item (far right in the flex row)
           try{ navBtn.style.order = '9999'; blur.parentElement.appendChild(navBtn); }catch(_i){}
           // If navbar button exists, hide the floating FAB entirely to avoid duplicates
