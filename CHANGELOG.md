@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.7.1 – 2025-09-09
+- Fixed: Compatibility on play.aidungeon.com – navbar mount now targets the correct Menu/Settings button when duplicates exist, preserves pointer events, and pins the AIDT control at the far right.
+- Changed: Separate Chrome vs Firefox handling for the navbar control (Chrome uses capture‑phase pointer handlers and debounce; Firefox uses a standard click), covering both play and beta domains.
+
 ## 1.4.7 – 2025-09-09
 - Changed: AIDT navbar button refined for Chrome/Firefox: true button element, keyboard support, capture‑phase handling and debounce to avoid double toggles; remains far‑right in the bar.
 - Fixed: Occasionally unclickable or double‑toggling navbar control in Chrome.

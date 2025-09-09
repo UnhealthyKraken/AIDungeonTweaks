@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.7
+// @version      1.4.7.1
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -1040,7 +1040,7 @@
   const parseLatestOutput = ()=>{
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
-      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity') || document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]');
       dbg('parseLatestOutput: preferred=', !!preferred);
       if (preferred){
         // First, run the normal node-by-node transform
@@ -1815,12 +1815,22 @@
       function mountNavBtn(){
         try{
           if (document.getElementById('aidt-nav-button')) return; // already mounted
-          const blur = document.querySelector('#game-blur-button');
+          // On play.aidungeon there are multiple #game-blur-button (Undo/Redo/Settings/Menu). Prefer Settings/Menu.
+          let blur = (function(){
+            try{
+              return document.querySelector('#game-blur-button[aria-label*="settings" i]')
+                  || document.querySelector('#game-blur-button[aria-label*="menu" i]')
+                  || document.querySelector('#game-blur-button');
+            }catch(_){ return document.querySelector('#game-blur-button'); }
+          })();
           if (!blur || !blur.parentElement) return;
           const navBtn = document.createElement('button');
           navBtn.id = 'aidt-nav-button';
           // Borrow styling from the blur button so it matches the navbar
-          try{ navBtn.className = blur.className || ''; }catch(_){ }
+          try{
+            const tokens = (blur.className||'').split(/\s+/).filter(Boolean).filter(c=>!/^_pe-/.test(c));
+            navBtn.className = tokens.join(' ');
+          }catch(_){ }
           // Minimal fallback styles if class copy fails
           navBtn.style.cursor='pointer'; navBtn.style.display='flex'; navBtn.style.alignItems='center'; navBtn.style.justifyContent='center';
           navBtn.style.pointerEvents='auto';
@@ -1857,16 +1867,24 @@
           const ua=(navigator.userAgent||'').toLowerCase();
           const isFirefox=/firefox/.test(ua);
           const isChrome=/chrome/.test(ua) && !/edg|opr/.test(ua);
+          const host=(location && location.hostname || '').toLowerCase();
+          const isPlay=/\bplay\.aidungeon\.com$/.test(host);
           if (isChrome){
-            try{ navBtn.style.position='relative'; navBtn.style.zIndex='2147483647'; }catch(_){ }
-            // Use a single capture-phase pointerdown to beat parent handlers and avoid double fire
-            try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+            try{ navBtn.style.position='relative'; navBtn.style.zIndex='2147483647'; navBtn.style.pointerEvents='auto'; }catch(_){ }
+            if (isPlay){
+              // On play.aidungeon Chrome, some parents use pointer-events:none; bind both pointerdown and click in capture phase
+              try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+              try{ navBtn.addEventListener('click', _toggle, true); }catch(_){ }
+            } else {
+              // beta: pointerdown capture suffices
+              try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+            }
           } else {
             navBtn.addEventListener('click', _toggle, false);
           }
           navBtn.addEventListener('keydown', function(ev){ try{ if (ev.key==='Enter' || ev.key===' '){ _toggle(ev); } }catch(_e){} });
           // Place as the last item (far right in the flex row)
-          try{ navBtn.style.order = '9999'; blur.parentElement.appendChild(navBtn); }catch(_i){}
+          try{ navBtn.style.order = '9999'; navBtn.style.pointerEvents='auto'; blur.removeAttribute('aria-disabled'); blur.parentElement.style.pointerEvents='auto'; blur.parentElement.appendChild(navBtn); }catch(_i){}
           // If navbar button exists, hide the floating FAB entirely to avoid duplicates
           try{ btn.style.display='none'; }catch(_){ }
         }catch(_){ }

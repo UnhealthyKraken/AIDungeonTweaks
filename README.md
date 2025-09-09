@@ -2,8 +2,6 @@
 
 A userscript (Tampermonkey/Violentmonkey) that improves how **AI Dungeon** text is displayed. It automatically converts AI Dungeon’s inline formatting (like `*italics*` or `**bold**`) into properly styled content and adds customisation features for story text.
 
-➡️ [Skip to Installation](#installation-userscript)
-
 [![Install userscript](https://img.shields.io/badge/Install-Userscript-blue)](https://raw.githubusercontent.com/UnhealthyKraken/AIDungeonTweaks/main/ai-dungeon-tweaks.user.js)
 
 Note: This project is unaffiliated with and not endorsed by AI Dungeon or Latitude.
