@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.8
+// @version      1.4.8.1
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -24,6 +24,8 @@
   const LS_PROFILES = 'aidt:config:profiles';
   const LS_BINDINGS = 'aidt:config:bindings';
   const ACTIVE_PROFILE = 'aidt:config:activeProfile';
+  const LS_LAST_PARAGRAPHS = 'aidt:config:lastParagraphs';
+  const lastParKeyFor = (profile)=>('aidt:config:lastParagraphs:'+(profile||'Default'));
 
   const DEFAULTS = {
     enabled: true,
@@ -244,10 +246,21 @@
   let activeName = bound || (localStorage.getItem(ACTIVE_PROFILE) || 'Default');
   if (!profiles.profiles[activeName]) { activeName='Default'; localStorage.setItem(ACTIVE_PROFILE,'Default'); }
   let settings   = merge(DEFAULTS, profiles.profiles[activeName] || {});
+
+  // Apply last-known Paragraphs choice ASAP (before publish)
+  try{
+    const lastParEarly = localStorage.getItem(lastParKeyFor(activeName)) || localStorage.getItem(LS_LAST_PARAGRAPHS);
+    if (lastParEarly && typeof lastParEarly === 'string' && lastParEarly.trim()){
+      settings.paragraphs = lastParEarly;
+      try{ profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES, profiles); }catch(_){ }
+    }
+  }catch(_){ }
+
   function publishSettings(){
     try{ window.__AIDT_SETTINGS__ = settings; }catch(e){}
   }
   publishSettings();
+  try{ profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES, profiles); }catch(_){ }
 
   const persistSettings = ()=>{ profiles=loadJSON(LS_PROFILES,{profiles:{}}); profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES,profiles); };
 
@@ -383,10 +396,28 @@
   const reHi      = /\^\^(.+?)\^\^|==(.+?)==/g;
   const reColour  = /\[color=(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)\]([\s\S]+?)\[\/color\]/g;
 
+  // Decode common HTML entities to avoid double-escaping when wrapping text extracted from HTML
+  const decodeEntities = (text)=>{
+    try{
+      const ta=document.createElement('textarea');
+      ta.innerHTML=String(text==null?'':text);
+      return ta.value;
+    }catch(_){
+      try{
+        return String(text==null?'':text)
+          .replace(/&amp;/g,'&')
+          .replace(/&lt;/g,'<')
+          .replace(/&gt;/g,'>')
+          .replace(/&quot;/g,'"')
+          .replace(/&#39;/g,"'");
+      }catch(__){ return String(text==null?'':text); }
+    }
+  };
+
   const wrap = (text, cls, style)=>{
     const span=document.createElement('span'); span.className=cls?('aidt '+cls):'aidt';
     if (style) span.setAttribute('style', style);
-    span.textContent=text;
+    span.textContent=decodeEntities(text);
     return span.outerHTML;
   };
 
@@ -692,28 +723,25 @@
         })();
         if (isEditingOutput) return;
       }catch(_){ }
-      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
-      const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
-      const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
-      if (!copy || !overlay) return;
-      const copyText = (function(){ try{ return pickTextElement(copy) || copy; }catch(_){ return copy; } })();
-      const copyHTML = String((copyText && copyText.innerHTML) || copy.innerHTML || '');
-      if (!copyHTML) return;
-      if (overlay.innerHTML !== copyHTML){
-        overlay.innerHTML = copyHTML;
-        try{ applyInlineSpanStyles(); }catch(_){ }
-        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
-        dbg('syncOverlayFromCopy: overlay replaced with copyText HTML');
-      }
-      try{
-        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
-        if (saturate && saturate.innerHTML !== copyHTML){
-          saturate.innerHTML = copyHTML;
-          try{ applyInlineSpanStyles(); }catch(_){ }
-          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
-          dbg('syncOverlayFromCopy: saturate replaced with copyText HTML');
-        }
-      }catch(_){ }
+      const overlays = Array.prototype.slice.call(document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'));
+      if (!overlays || !overlays.length) return;
+      overlays.forEach(function(overlay){
+        try{
+          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) return;
+          const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
+          const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
+          const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
+          const text = getBaselineTextFor(source, txt(source) || '');
+          if (!text) return;
+          let html = transformString(applyParagraphsToText(text)) || '';
+          try{ html = applyParagraphsToHTML(html); }catch(_){ }
+          if (html && overlay.innerHTML !== html){
+            overlay.innerHTML = html;
+            try{ applyInlineSpanStyles(); }catch(_){ }
+            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+          }
+        }catch(_each){ }
+      });
     }catch(_){ }
   }
 
@@ -736,8 +764,11 @@
 
   // Rebuild the split-word overlay row (transition-opacity / game-backdrop-saturate)
   // directly from its own text so the newest paragraph shows AIDT spans immediately.
+  const OVERLAY_WRAP_SAFE = true; // Only disable wrapping/reparenting; allow full overlay rebuild
+  const OVERLAY_MUTATION_SAFE = true; // Disable innerHTML mutations in Next-managed overlay to avoid removeChild errors
   function rebuildOverlayFromOwnText(container){
     try{
+      if (OVERLAY_MUTATION_SAFE) return;
       if (!container) return;
       const isOverlayRow = (container.id && container.id==='transition-opacity') ||
                            (container.querySelector && container.querySelector('#game-backdrop-saturate'));
@@ -762,6 +793,7 @@
   // applies without changing the tokenization.
   function overlayWrapSpeech(container){
     try{
+      if (OVERLAY_WRAP_SAFE) return; // avoid moving tokens inside React tree
       if (!container) return;
       const hasOverlay = (container.id && container.id==='transition-opacity') ||
                          (container.querySelector && container.querySelector('#game-backdrop-saturate'));
@@ -871,6 +903,7 @@
   function normalizeOverlay(){
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      if (OVERLAY_MUTATION_SAFE) return;
       // Skip only while editing the output paragraph itself
       try{
         var isEditingOutput = (function(){
@@ -883,58 +916,42 @@
         })();
         if (isEditingOutput) return;
       }catch(_){ }
-      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
-      if (!overlay) return;
-      // If this overlay is an action row, avoid flattening its structure. Only wrap speech and restyle.
-      try{
-        if (overlay.querySelector && overlay.querySelector('#action-icon')){
-          try{ overlayWrapSpeech(overlay); }catch(_ow){}
-          try{ applyInlineSpanStyles(); }catch(_as){}
-          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_sd){}
-          return;
-        }
-      }catch(_){ }
-      const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
-      const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
-      const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
-      const text = getBaselineTextFor(source, txt(source) || '');
-      if (!text) return;
-      let html = transformString(applyParagraphsToText(text)) || '';
-      try{ html = applyParagraphsToHTML(html); }catch(_){ }
-      if (html && overlay.innerHTML !== html){
-        overlay.innerHTML = html;
-        try{ applyInlineSpanStyles(); }catch(_){ }
-        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
-        dbg('normalizeOverlay: overlay replaced from source text');
-      }
-      try{
-        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
-        if (saturate && html && saturate.innerHTML !== html){
-          saturate.innerHTML = html;
-          try{ applyInlineSpanStyles(); }catch(_){ }
-          try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
-          dbg('normalizeOverlay: saturate replaced from source text');
-        }
-      }catch(_){ }
+      const overlays = Array.prototype.slice.call(document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'));
+      if (!overlays || !overlays.length) return;
+      overlays.forEach(function(overlay){
+        try{
+          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) return;
+          const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
+          const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
+          const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
+          const text = getBaselineTextFor(source, txt(source) || '');
+          if (!text) return;
+          let html = transformString(applyParagraphsToText(text)) || '';
+          try{ html = applyParagraphsToHTML(html); }catch(_){ }
+          if (html && overlay.innerHTML !== html){
+            overlay.innerHTML = html;
+            try{ applyInlineSpanStyles(); }catch(_){ }
+            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+          }
+        }catch(_each){ }
+      });
     }catch(_){ }
   }
 
   function setupOverlayObserver(){
     try{
-      const overlay = ql('#gameplay-output #transition-opacity, #transition-opacity');
-      if (!overlay) return;
-      const rebalance = debounce(()=>{ try{ if (window.__AIDT_PAUSE__) return; normalizeOverlay(); try{ const ol=ql('#gameplay-output #transition-opacity, #transition-opacity'); if (ol) overlayWrapSpeech(ol); }catch(_){ } }catch(_){ } }, 80);
+      const root = document.getElementById('gameplay-output') || document.body;
+      if (!root) return;
+      const rebalance = debounce(()=>{ try{ if (window.__AIDT_PAUSE__) return; bulkNormalizeOverlays(); }catch(_){ } }, 120);
       const mo = new MutationObserver(function(muts){
-        for (var i=0;i<muts.length;i++){
-          var m=muts[i];
-          if (m.type==='childList' || m.type==='characterData'){ rebalance(); break; }
-        }
+        try{
+          for (var i=0;i<muts.length;i++){
+            var m=muts[i];
+            if (m.type==='childList' || m.type==='characterData'){ rebalance(); break; }
+          }
+        }catch(_){ }
       });
-      mo.observe(overlay, {childList:true, subtree:true, characterData:true});
-      try{
-        const saturate = ql('#gameplay-output #game-backdrop-saturate, #game-backdrop-saturate');
-        if (saturate) mo.observe(saturate, {childList:true, subtree:true, characterData:true});
-      }catch(_){ }
+      mo.observe(root, {childList:true, subtree:true, characterData:true});
       try{ window.__AIDT_OVERLAY_OBSERVER__ = mo; }catch(_){ }
     }catch(_){ }
   }
@@ -1119,7 +1136,10 @@
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       // If user is actively editing, avoid re-rendering the newest paragraph to preserve caret/clicks
       try{ if (isEditingActive()) return; }catch(_){ }
-      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity') || document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]');
+      // Prefer the LAST overlay row on the page, as beta renders multiple '#transition-opacity' entries
+      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
+                      document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
+                      document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
       dbg('parseLatestOutput: preferred=', !!preferred);
       if (preferred){
         // First, run the normal node-by-node transform
@@ -1219,8 +1239,15 @@
     try{
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       try{ if (isEditingActive()) return; }catch(_){ }
-      const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+      // Prefer the LAST overlay row on the page
+      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
+                      document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
+                      document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
       const container = preferred || null;
+      // If container is the overlay, rebuild it from its own text first, then pick a text element
+      if (container && ((container.id && container.id==='transition-opacity') || (container.querySelector && container.querySelector('#game-backdrop-saturate')))){
+        try{ rebuildOverlayFromOwnText(container); overlayWrapSpeech(container); }catch(_){ }
+      }
       const textEl = container ? pickTextElement(container) : (findLatestTextEl() || null);
       dbg('ensureLatestFormatted: preferred=', !!preferred, preferred ? preferred.id||preferred.tagName : null, 'textEl=', !!textEl);
       __aidt_debugDumpLatest(container || textEl, textEl);
@@ -1230,7 +1257,8 @@
       try{
         const rawNow = txt(textEl)||'';
         if (rawNow && !(textEl.innerHTML||'').match(/class=\"aidt/)){
-          const htmlNow = transformString(rawNow);
+          let htmlNow = transformString(applyParagraphsToText(rawNow)) || '';
+          try{ htmlNow = applyParagraphsToHTML(htmlNow); }catch(_){ }
           if (htmlNow && htmlNow !== rawNow){ textEl.innerHTML = htmlNow; }
         }
       }catch(_){ }
@@ -1240,7 +1268,8 @@
         const t = getBaselineTextFor(textEl, txt(textEl));
         dbg('ensureLatestFormatted: hasSpans=', hasSpans, 'len=', (t||'').length, 'markers=', /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(t));
         if (!hasSpans && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(t)){
-          const html = transformString(t);
+          let html = transformString(applyParagraphsToText(t)) || '';
+          try{ html = applyParagraphsToHTML(html); }catch(_){ }
           dbg('ensureLatestFormatted: transformed=', html!==t);
           if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
         }
@@ -1296,15 +1325,18 @@
     let latestMo=null; let latestTarget=null;
     const attachLatestObserver=()=>{
       try{
-        const preferred = document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #transition-opacity') || document.querySelector('#transition-opacity');
+        // Prefer the LAST overlay row on the page
+        let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
+                        document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
+                        document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
         const candidate = preferred || (document.querySelectorAll(LATEST_SELECTORS)||[])[(document.querySelectorAll(LATEST_SELECTORS)||[]).length-1];
         if (!candidate || candidate===latestTarget) return;
         if (latestMo) { try{ latestMo.disconnect(); }catch(_){}; latestMo=null; }
         latestTarget=candidate;
-        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
+        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["]([^"\n]+)["])|\*(?:"|["])([\s\S]*?)(?:"|["])\*/.test(tx)){ let h = transformString(applyParagraphsToText(tx)) || ''; try{ h = applyParagraphsToHTML(h); }catch(_){ } if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
         latestMo.observe(latestTarget,{childList:true,subtree:true,characterData:true});
         // Immediate pass on attach
-        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["][^"\n]+["])|\*(?:"|["])[\s\S]*?(?:"|["])\*/.test(tx)){ const h=transformString(tx); if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
+        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["]([^"\n]+)["])|\*(?:"|["])([\s\S]*?)(?:"|["])\*/.test(tx)){ let h = transformString(applyParagraphsToText(tx)) || ''; try{ h = applyParagraphsToHTML(h); }catch(_){ } if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
       }catch(_){ }
     };
     const flush=()=>{
@@ -1823,7 +1855,8 @@
           // Protect IM markers so we can treat them like quotes
           t = t.replace(/\*"([\s\S]*?)"\*/g, function(m){ imQuotedBuf.push(m); return '§IMQ§'+(imQuotedBuf.length-1)+'§'; });
           t = t.replace(/\*(?=\S)([^*\n]+?)\*/g, function(m){ imPlainBuf.push(m); return '§IMP§'+(imPlainBuf.length-1)+'§'; });
-          const quoteRe=/["“][\s\S]*?["”]/g;
+          // Match double-quoted strings without consuming following narration/spaces
+          const quoteRe=/"(?:[^"\n]|\\")*"/g;
           const tokens=[]; let idx=0; let m;
           const pushNarrationParts=(chunk)=>{
             if (!chunk) return;
@@ -1846,24 +1879,29 @@
           const tail=t.slice(idx); if (tail) pushNarrationParts(tail);
           // Build output with spacing rules
           let outSeg='';
+          const isAtParagraphBoundary=()=> outSeg==='' || /\n\n$/.test(outSeg);
           const appendBlankLineBefore=()=>{
-            if (outSeg.endsWith('\n\n')) return;
+            if (outSeg==='' || outSeg.endsWith('\n\n')) return;
             if (outSeg.endsWith('\n')) { outSeg += '\n'; return; }
-            if (outSeg) outSeg += '\n\n';
+            outSeg += '\n\n';
           };
           for (let iTok=0;iTok<tokens.length;iTok++){
             const tok=tokens[iTok];
             if (tok.type==='text'){
               outSeg += tok.text; // preserve spaces in narration
             } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
-              appendBlankLineBefore();
-              // Trim only ASCII spaces around the quote/IM text; keep non-breaking/invisible spaces
+              const standalone = isAtParagraphBoundary();
+              if (standalone) appendBlankLineBefore();
               const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
-              outSeg += q + '\n'; // single newline after
-              // Ensure exactly one newline after quotes/IM by stripping leading ASCII newlines/spaces from next narration token
-              const next=tokens[iTok+1];
-              if (next && next.type==='text' && next.text){
-                next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+              if (standalone){
+                outSeg += q + '\n';
+                const next=tokens[iTok+1];
+                if (next && next.type==='text' && next.text){
+                  next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+                }
+              } else {
+                // Inline quote inside a running sentence: keep it on the same line
+                outSeg += q;
               }
             }
           }
@@ -1871,8 +1909,9 @@
           outSeg = outSeg
             .replace(/§IMQ§(\d+)§/g, (_,k)=> imQuotedBuf[Number(k)] || '')
             .replace(/§IMP§(\d+)§/g, (_,k)=> imPlainBuf[Number(k)] || '');
-          // Collapse 3+ newlines to two for safety
+          // Collapse excessive blank lines (including those with ASCII spaces)
           outSeg = outSeg.replace(/\n{3,}/g,'\n\n');
+          outSeg = outSeg.replace(/\n(?:[ \t]*\n){2,}/g,'\n\n');
           parts[i]=outSeg;
         }
       }
@@ -1902,7 +1941,8 @@
         const imPlainBuf=[];   // stores *text*
         s = s.replace(/\*"([\s\S]*?)"\*/g, function(m){ imQuotedBuf.push(m); return '§IMQ§'+(imQuotedBuf.length-1)+'§'; });
         s = s.replace(/\*(?=\S)([^*\n]+?)\*/g, function(m){ imPlainBuf.push(m); return '§IMP§'+(imPlainBuf.length-1)+'§'; });
-        const quoteRe=/["“][\s\S]*?["”]/g;
+        // Match double-quoted strings without consuming following narration/spaces
+        const quoteRe=/"(?:[^"\n]|\\")*"/g;
         const tokens=[]; let idx=0; let m;
         const pushNarrationParts=(chunk)=>{
           if (!chunk) return;
@@ -1923,29 +1963,36 @@
         }
         const tail=s.slice(idx); if (tail) pushNarrationParts(tail);
         let out='';
+        const isAtParagraphBoundary=()=> out==='' || /\n\n$/.test(out);
         const appendBlankLineBefore=()=>{
-          if (out.endsWith('\n\n')) return;
+          if (out==='' || out.endsWith('\n\n')) return;
           if (out.endsWith('\n')) { out += '\n'; return; }
-          if (out) out += '\n\n';
+          out += '\n\n';
         };
         for (let iTok=0;iTok<tokens.length;iTok++){
           const tok=tokens[iTok];
           if (tok.type==='text'){
             out += tok.text; // keep original narration spacing
           } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
-            appendBlankLineBefore();
+            const standalone = isAtParagraphBoundary();
+            if (standalone) appendBlankLineBefore();
             const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
-            out += q + '\n';
-            const next=tokens[iTok+1];
-            if (next && next.type==='text' && next.text){
-              next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+            if (standalone){
+              out += q + '\n';
+              const next=tokens[iTok+1];
+              if (next && next.type==='text' && next.text){
+                next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
+              }
+            } else {
+              out += q; // inline quote: keep on same line
             }
           }
         }
         out = out
           .replace(/§IMQ§(\d+)§/g, (_,k)=> imQuotedBuf[Number(k)] || '')
           .replace(/§IMP§(\d+)§/g, (_,k)=> imPlainBuf[Number(k)] || '')
-          .replace(/\n{3,}/g,'\n\n');
+          .replace(/\n{3,}/g,'\n\n')
+          .replace(/\n(?:[ \t]*\n){2,}/g,'\n\n');
         return out;
       }
       return text;
@@ -2449,7 +2496,7 @@
       $('#rng-line-height').value = settings.lineHeight || 1.5;
       $('#rng-letter-spacing').value = settings.letterSpacing || 0;
       $('#dd-text-align').value = settings.textAlign || 'default';
-      try{ $('#dd-paragraphs').value = (settings.paragraphs||'default'); }catch(_){ }
+      const ddPar=$('#dd-paragraphs'); if (ddPar) { ddPar.value = settings.paragraphs || 'default'; }
 
       renderKeywordChips();
 
@@ -2665,7 +2712,26 @@
       el.addEventListener('input',  applyLive);
       el.addEventListener('change', applyLive);
       if (id==='dd-paragraphs'){
-        el.addEventListener('change', ()=>{ try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); bulkNormalizeOverlays(); }catch(_){ } });
+        el.addEventListener('change', ()=>{
+          try{
+            const v=$('#dd-paragraphs').value||'default';
+            localStorage.setItem(LS_LAST_PARAGRAPHS, v);
+            localStorage.setItem(lastParKeyFor(activeName), v);
+            rebuildVisibleParagraphs();
+            ensureLatestFormatted();
+            bulkNormalizeOverlays();
+
+            const jumpBottom=()=>{
+              try{
+                const s=document.scrollingElement||document.documentElement||document.body;
+                s.scrollTop=s.scrollHeight;
+              }catch(_){ try{ window.scrollTo(0,(document.body&&document.body.scrollHeight)||0); }catch(__){} }
+            };
+            setTimeout(jumpBottom,0);
+            setTimeout(jumpBottom,50);
+            setTimeout(jumpBottom,200);
+          }catch(_){ }
+        });
       }
     });
 
@@ -2817,6 +2883,8 @@
     $('#close').addEventListener('click', ()=>panel.classList.remove('open'));
 
     refreshUI();
+    // Ensure dropdown reflects restored settings (even when panel starts hidden)
+    try{ const dd=panel.querySelector('#dd-paragraphs'); if (dd && dd.value !== (settings.paragraphs||'default')) dd.value = (settings.paragraphs||'default'); }catch(_){ }
     panelAPI={ panel, showTab };
     return panelAPI;
   }
@@ -2875,6 +2943,8 @@
       const api=buildPanel();
       // On load, avoid early background flash: style text first, then background later
       applyGlobalNoBG();
+      // Apply paragraph mode immediately on startup (panel may be hidden)
+      try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); bulkNormalizeOverlays(); }catch(_){ }
       // Apply base text immediately on load
       try{ applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
       // Force an initial latest parse-and-style sweep after first paint, then apply background last

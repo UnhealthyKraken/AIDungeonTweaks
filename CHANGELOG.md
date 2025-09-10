@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.8.1 – 2025-09-10
+- Fixed: New Line paragraph mode now preserves narration as-is, adds a blank line before quotes/IM, and ensures exactly one newline after them. It no longer splits narration into separate sentences and no longer strips invisible spaces.
+- Fixed: Double-blank lines between entries collapsed to a single blank line (handles spaces-only lines too).
+- Fixed: Quotes and IM spacing unified so both use one blank line after, not two.
+- Stability: Disabled risky overlay token-wrapping (reparenting) on the live split-word overlay to avoid intermittent NextJS removeChild errors and page crashes. Paragraph formatting still applies to the newest paragraph via safe overlay normalization.
+
 ## 1.4.8 – 2025-09-09
 - Added: Background “Image URL” mode (under Misc → Background). Paste any image URL to use it as the page background. The image option is applied immediately and persists per profile.
 - Added: Text Formatting → Font → Paragraphs setting (Default, Basic, New Line):
