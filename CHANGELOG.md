@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.8.2 – 2025-09-10
+- Fixed: Paragraphs setting now persists across reloads; UI no longer overwrites saved value during refresh.
+- Changed: Changing Paragraphs setting keeps view pinned to the bottom of the page.
+- Fixed: New Line mode refined to preserve narration and only isolate quotes/IM at paragraph boundaries (no mid‑sentence splits).
+- Fixed: Prevent double‑escaping of ampersands/entities inside quotes and IM (e.g., R&D stays R&D).
+- Fixed: Short punctuated quotes like "Yes," and "Yes." are now colored as speech.
+
 ## 1.4.8.1 – 2025-09-10
 - Fixed: New Line paragraph mode now preserves narration as-is, adds a blank line before quotes/IM, and ensures exactly one newline after them. It no longer splits narration into separate sentences and no longer strips invisible spaces.
 - Fixed: Double-blank lines between entries collapsed to a single blank line (handles spaces-only lines too).

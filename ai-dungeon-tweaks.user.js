@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.8.1
+// @version      1.4.8.2
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -539,7 +539,18 @@
     if (settings.rSpeechWeight){
       const spStyle = 'color:' + (settings.speech.colour || '#ffffff') + ';' +
                       (settings.speech.bold ? 'font-weight:700;' : '');
-      const shouldWrapSpeech = (t)=>{ try{ const s=(t||'').trim(); if (s.length<6) return false; if (/\s/.test(s)) return true; if (/[.!?]$/.test(s)) return true; return false; }catch(_){ return true; } };
+      const shouldWrapSpeech = (t)=>{
+        try{
+          const s=(t||'').trim();
+          if (!s) return false;
+          // Always allow if it ends with common sentence punctuation (inside quotes)
+          if (/[.!?,;:…]$/.test(s)) return true;
+          // Multi-word quotes are fine
+          if (/\s/.test(s)) return true;
+          // Otherwise require a bit of length to avoid inch marks/false positives
+          return s.length >= 6;
+        }catch(_){ return true; }
+      };
       const straightHasPrefix = reSpeechStraight.source.indexOf('(^|[^*])') === 0;
       const curlyHasPrefix    = reSpeechCurly.source.indexOf('(^|[^*])') === 0;
       if (straightHasPrefix) out = replaceOutsideTags(out, reSpeechStraight, (m, pre, inner)=>(pre||'') + (shouldWrapSpeech(inner) ? wrap('"' + inner + '"','aidt-speech', spStyle) : m));
