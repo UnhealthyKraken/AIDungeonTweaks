@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.8.3 – 2025-09-10
+- Changed: Paragraphs → New Line now places every quote/IM on its own line and trims any leading indentation on the following narration.
+
 ## 1.4.8.2 – 2025-09-10
 - Fixed: Paragraphs setting now persists across reloads; UI no longer overwrites saved value during refresh.
 - Changed: Changing Paragraphs setting keeps view pinned to the bottom of the page.

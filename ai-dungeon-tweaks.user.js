@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.8.2
+// @version      1.4.8.3
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -1890,7 +1890,6 @@
           const tail=t.slice(idx); if (tail) pushNarrationParts(tail);
           // Build output with spacing rules
           let outSeg='';
-          const isAtParagraphBoundary=()=> outSeg==='' || /\n\n$/.test(outSeg);
           const appendBlankLineBefore=()=>{
             if (outSeg==='' || outSeg.endsWith('\n\n')) return;
             if (outSeg.endsWith('\n')) { outSeg += '\n'; return; }
@@ -1901,18 +1900,12 @@
             if (tok.type==='text'){
               outSeg += tok.text; // preserve spaces in narration
             } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
-              const standalone = isAtParagraphBoundary();
-              if (standalone) appendBlankLineBefore();
+              appendBlankLineBefore();
               const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
-              if (standalone){
-                outSeg += q + '\n';
-                const next=tokens[iTok+1];
-                if (next && next.type==='text' && next.text){
-                  next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
-                }
-              } else {
-                // Inline quote inside a running sentence: keep it on the same line
-                outSeg += q;
+              outSeg += q + '\n';
+              const next=tokens[iTok+1];
+              if (next && next.type==='text' && next.text){
+                next.text = next.text.replace(/^(?:[ \t]*\n+[ \t]*|[ \t]+)/,'');
               }
             }
           }
@@ -1985,17 +1978,12 @@
           if (tok.type==='text'){
             out += tok.text; // keep original narration spacing
           } else if (tok.type==='quote' || tok.type==='imq' || tok.type==='imp'){
-            const standalone = isAtParagraphBoundary();
-            if (standalone) appendBlankLineBefore();
+            appendBlankLineBefore();
             const q = tok.text.replace(/^[ \t]+|[ \t]+$/g,'');
-            if (standalone){
-              out += q + '\n';
-              const next=tokens[iTok+1];
-              if (next && next.type==='text' && next.text){
-                next.text = next.text.replace(/^[ \t]*\n+[ \t]*/,'');
-              }
-            } else {
-              out += q; // inline quote: keep on same line
+            out += q + '\n';
+            const next=tokens[iTok+1];
+            if (next && next.type==='text' && next.text){
+              next.text = next.text.replace(/^(?:[ \t]*\n+[ \t]*|[ \t]+)/,'');
             }
           }
         }
