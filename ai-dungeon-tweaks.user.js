@@ -1,16 +1,14 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.8.3
+// @version      1.4.9
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
 // @license      MIT
 // @description  AI Dungeon Tweaks, including custom fonts, formatting, colors, and more.
 // @match        https://*.aidungeon.com/*
-// @match        https://beta.aidungeon.com/*
-// @match        https://play.aidungeon.com/*
-// @run-at       document-end
+// @run-at       document-idle
 // @grant        none
 // @noframes
 // @downloadURL  https://raw.githubusercontent.com/UnhealthyKraken/AIDungeonTweaks/main/ai-dungeon-tweaks.user.js
@@ -19,6 +17,76 @@
 
 (function(){
   'use strict';
+
+  // AIDT: Safely track and disconnect observers on navigation
+  (function(){
+    try{
+      var OrigMO = window.MutationObserver;
+      if (OrigMO && !window.__AIDT_MO_WRAPPED__){
+        window.__AIDT_MO_WRAPPED__ = true;
+        window.__AIDT_OBSERVERS = window.__AIDT_OBSERVERS || new Set();
+        window.__AIDT_HAS_SAYDO__ = (typeof window.AIDT_applySayDo === 'function');
+        Object.defineProperty(window, '__AIDT_HAS_SAYDO__', { configurable: true, writable: true });
+        // Stop overriding global MutationObserver; track only our created observers
+        window.MutationObserver = OrigMO;
+        window.__AIDT_OBSERVERS_ADD__ = function(obs){ try{ window.__AIDT_OBSERVERS.add(obs); }catch(_){ } };
+        function __aidt_disconnectAll(){
+          try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
+          try{
+            var set = window.__AIDT_OBSERVERS;
+            if (set && set.forEach){
+              set.forEach(function(o){ try{ o.disconnect(); }catch(_){ } });
+              if (typeof set.clear === 'function') set.clear();
+            }
+          }catch(_){ }
+          try{ __AIDT_TEXT_CACHE = null; __AIDT_PICK_CACHE = null; }catch(_){ }
+          try{ var host=document.getElementById('aidt-panel-host'); if (host && host.parentNode){ host.parentNode.removeChild(host); } }catch(_){ }
+          try{ var css=document.getElementById('aidt-inline-css'); if (css && css.parentNode){ css.parentNode.removeChild(css); } }catch(_){ }
+          try{ var bg=document.getElementById('aidt-bg-style'); if (bg && bg.parentNode){ bg.parentNode.removeChild(bg); } }catch(_){ }
+          try{ var amb=document.getElementById('aidt-ambience-hide'); if (amb && amb.parentNode){ amb.parentNode.removeChild(amb); } }catch(_){ }
+        }
+        function __aidt_disconnectObservers(){
+          try{
+            var set = window.__AIDT_OBSERVERS;
+            if (set && set.forEach){
+              set.forEach(function(o){ try{ o.disconnect(); }catch(_){ } });
+              if (typeof set.clear === 'function') set.clear();
+            }
+          }catch(_){ }
+        }
+        window.addEventListener('pagehide', __aidt_disconnectAll, true);
+        window.addEventListener('beforeunload', __aidt_disconnectAll, true);
+        // Recompute availability on every microtask turn where needed
+        setTimeout(function(){ try{ window.__AIDT_HAS_SAYDO__ = (typeof window.AIDT_applySayDo === 'function'); }catch(_){ } }, 0);
+
+        // Pause observers in background tabs and resume on visibility (with token counter)
+        try{
+          window.__AIDT_PAUSE_COUNT__ = 0;
+          window.AIDT_pause = function(){ try{ window.__AIDT_PAUSE_COUNT__++; }catch(_){ } };
+          window.AIDT_resume = function(){ try{ window.__AIDT_PAUSE_COUNT__ = Math.max(0,(window.__AIDT_PAUSE_COUNT__||0)-1); }catch(_){ } };
+          window.AIDT_isPaused = function(){ try{ return !!(window.__AIDT_PAUSE__ || (window.__AIDT_PAUSE_COUNT__>0)); }catch(_){ return false; } };
+          document.addEventListener('visibilitychange', function(){
+            try{
+              if (document.visibilityState === 'hidden'){
+                try{ window.__AIDT_PAUSE__ = true; }catch(_p){}
+                try{ window.__AIDT_PAUSE_COUNT__ = 1; }catch(_c){}
+                __aidt_disconnectObservers();
+              } else {
+                try{ window.__AIDT_PAUSE__ = false; }catch(_p2){}
+                try{ window.__AIDT_PAUSE_COUNT__ = 0; }catch(_c2){}
+                try{ setupFormatObserver(); }catch(_s1){}
+                try{ setupOverlayObserver(); }catch(_s2){}
+                try{ attachAmbienceObserver(); }catch(_s3){}
+                try{ ensureLatestFormatted(); }catch(_s4){}
+              }
+            }catch(_v){}
+          }, true);
+        }catch(_l){}
+      }
+    }catch(_){ }
+  })();
+
+  // (Reverted) suppression helper removed due to interfering with latest formatting
 
   // ---------------- Profiles & Settings ----------------
   const LS_PROFILES = 'aidt:config:profiles';
@@ -60,11 +128,10 @@
     bgImageInFront: false,
     languageOverride: 'default',
 
-    // Site integration
-    aiModel: ''
+    // Site integration (AI Model removed)
   };
 
-  const clone = o => JSON.parse(JSON.stringify(o));
+  const clone = (o)=>{ try{ if (typeof structuredClone==='function') return structuredClone(o); }catch(_){ } try{ return JSON.parse(JSON.stringify(o)); }catch(_){ return o; } };
   const merge = (a, b) => {
     if (!b) return a;
     const out = clone(a);
@@ -75,31 +142,50 @@
     return out;
   };
 
+  // Small memo cache for theme presets → resolved settings
+  const __AIDT_THEME_CACHE = Object.create(null);
+  const getResolvedThemePreset = (name) => {
+    try{
+      if (__AIDT_THEME_CACHE[name]) return __AIDT_THEME_CACHE[name];
+      const p = THEME_PRESETS[name]; if (!p) return null;
+      // Create a resolved shallow copy so we don't mutate source presets
+      const resolved = clone(p);
+      __AIDT_THEME_CACHE[name] = resolved;
+      return resolved;
+    }catch(_){ return null; }
+  };
   // --- Simple i18n for panel labels ---
-  const LOCALES = {
+  const __LOCALES_ALL = {
     'en-US': {
       'Actions':'Actions','Text Formatting':'Text Formatting','Miscellaneous':'Miscellaneous',
       'Do':'Do','Say':'Say','Bold':'Bold','Colour':'Color','Effect':'Effect',
       'Main Text':'Main Text','Speech':'Speech','Internal Monologue':'Internal Monologue','Italics':'Italics','Keywords':'Keywords','Add Keyword':'Add Keyword',
       'All Caps Effects':'All Caps Effects','Font':'Font','Font Family':'Font Family','Font Size':'Font Size','Font Weight':'Font Weight','Line Height':'Line Height','Letter Spacing':'Letter Spacing','Text Alignment':'Text Alignment','Reset Font':'Reset Font',
       'Reset Text Formatting':'Reset Text Formatting','Background':'Background','Background type':'Background type','Background colour':'Background color','Backdrop opacity':'Backdrop opacity',
-      'Language':'Language','Language override':'Language override','Profiles':'Profiles','Profile':'Profile','Save as new':'Save as new','Rename':'Rename','Duplicate':'Duplicate','Delete':'Delete','Bind to this story':'Bind to this story','Unbind':'Unbind',
+      'Language':'Language','Language override':'Language override','Profiles':'Profiles','Profile':'Profile','Save as new':'Save as new','Save':'Save','Rename':'Rename','Duplicate':'Duplicate','Delete':'Delete','Bind to this story':'Bind to this story','Unbind':'Unbind',
       'Export':'Export','Import':'Import','Reset All':'Reset All','Default':'Default','Backdrop (behind overlays)':'Backdrop (behind overlays)','Solid (override overlays)':'Solid (override overlays)',
-      'Reset':'Reset','Add':'Add','Enable':'Enable','Disable':'Disable'
+      'Reset':'Reset','Add':'Add','Enable':'Enable','Disable':'Disable',
+      'Paragraphs':'Paragraphs','AI Model':'AI Model','Model':'Model','Refresh':'Refresh','Custom image URL':'Custom image URL','None found':'None found','Exclusions':'Exclusions',
+      'Theme Presets':'Theme Presets','Theme':'Theme','Preset':'Preset','Apply':'Apply','Select…':'Select…','Gradient':'Gradient','Image Options':'Image Options','Custom Google Fonts URL':'Custom Google Fonts URL','Image URL':'Image URL','Export / Import':'Export / Import','Active':'Active','Custom Color…':'Custom Color…','Export active profile':'Export active profile','Import (Merge)':'Import (Merge)','Import (Replace)':'Import (Replace)','Size':'Size','Position':'Position','Repeat':'Repeat','Attachment':'Attachment'
     },
     'en-GB': {
       'Colour':'Colour',
-      'Background colour':'Background colour'
+      'Background colour':'Background colour',
+      'Custom Color…':'Custom Colour…',
+      'Select…':'Select…',
+      'Theme Presets':'Theme Presets','Theme':'Theme','Preset':'Preset','Apply':'Apply','Gradient':'Gradient','Image Options':'Image Options','Custom Google Fonts URL':'Custom Google Fonts URL','Image URL':'Image URL','Export / Import':'Export / Import','Export active profile':'Export active profile','Import (Merge)':'Import (Merge)','Import (Replace)':'Import (Replace)','Size':'Size','Position':'Position','Repeat':'Repeat','Attachment':'Attachment'
     },
     'es': {
       'Actions':'Acciones','Text Formatting':'Formato de texto','Miscellaneous':'Varios',
       'Do':'Hacer','Say':'Decir','Bold':'Negrita','Colour':'Color','Effect':'Efecto',
-      'Main Text':'Texto principal','Speech':'Diálogo','Internal Monologue':'Monólogo interno','Keywords':'Palabras clave','Add Keyword':'Añadir palabra clave',
+      'Main Text':'Texto principal','Speech':'Dialogo','Internal Monologue':'Monólogo interno','Keywords':'Palabras clave','Add Keyword':'Añadir palabra clave',
       'All Caps Effects':'Efectos de MAYÚSCULAS','Font':'Fuente','Font Family':'Familia de fuente','Font Size':'Tamaño de fuente','Font Weight':'Grosor de fuente','Line Height':'Altura de línea','Letter Spacing':'Espaciado de letras','Text Alignment':'Alineación del texto','Reset Font':'Restablecer fuente',
       'Reset Text Formatting':'Restablecer formato de texto','Background':'Fondo','Background type':'Tipo de fondo','Background colour':'Color de fondo','Backdrop opacity':'Opacidad del fondo',
       'Language':'Idioma','Language override':'Idioma de la interfaz','Profiles':'Perfiles','Profile':'Perfil','Save as new':'Guardar como nuevo','Rename':'Renombrar','Duplicate':'Duplicar','Delete':'Eliminar','Bind to this story':'Vincular a esta historia','Unbind':'Desvincular',
       'Export':'Exportar','Import':'Importar','Reset All':'Restablecer todo','Default':'Predeterminado','Backdrop (behind overlays)':'Fondo (detrás de superposiciones)','Solid (override overlays)':'Sólido (anula superposiciones)',
-      'Reset':'Restablecer','Add':'Añadir','Enable':'Activar','Disable':'Desactivar'
+      'Reset':'Restablecer','Add':'Añadir','Enable':'Activar','Disable':'Desactivar',
+      'Paragraphs':'Párrafos','AI Model':'Modelo de IA','Model':'Modelo','Refresh':'Actualizar','Custom image URL':'URL de imagen personalizada','None found':'Ninguno encontrado','Exclusions':'Exclusiones',
+      'Select…':'Seleccionar…'
     },
     'fr': {
       'Actions':'Actions','Text Formatting':'Mise en forme du texte','Miscellaneous':'Divers',
@@ -109,7 +195,9 @@
       'Reset Text Formatting':'Réinitialiser la mise en forme','Background':'Arrière-plan','Background type':'Type d\'arrière-plan','Background colour':'Couleur d\'arrière-plan','Backdrop opacity':'Opacité du fond',
       'Language':'Langue','Language override':'Langue de l\'interface','Profiles':'Profils','Profile':'Profil','Save as new':'Enregistrer comme nouveau','Rename':'Renommer','Duplicate':'Dupliquer','Delete':'Supprimer','Bind to this story':'Lier à cette histoire','Unbind':'Délier',
       'Export':'Exporter','Import':'Importer','Reset All':'Tout réinitialiser','Default':'Par défaut','Backdrop (behind overlays)':'Fond (derrière les superpositions)','Solid (override overlays)':'Solide (remplace les superpositions)',
-      'Reset':'Réinitialiser','Add':'Ajouter','Enable':'Activer','Disable':'Désactiver'
+      'Reset':'Réinitialiser','Add':'Ajouter','Enable':'Activer','Disable':'Désactiver',
+      'Paragraphs':'Paragraphes','AI Model':'Modèle d\'IA','Model':'Modèle','Refresh':'Actualiser','Custom image URL':'URL d\'image personnalisée','None found':'Aucun trouvé','Exclusions':'Exclusions',
+      'Select…':'Sélectionner…'
     },
     'de': {
       'Actions':'Aktionen','Text Formatting':'Textformatierung','Miscellaneous':'Sonstiges',
@@ -119,7 +207,9 @@
       'Reset Text Formatting':'Textformatierung zurücksetzen','Background':'Hintergrund','Background type':'Hintergrundtyp','Background colour':'Hintergrundfarbe','Backdrop opacity':'Hintergrund-Deckkraft',
       'Language':'Sprache','Language override':'UI-Sprache','Profiles':'Profile','Profile':'Profil','Save as new':'Als neu speichern','Rename':'Umbenennen','Duplicate':'Duplizieren','Delete':'Löschen','Bind to this story':'An diese Geschichte binden','Unbind':'Bindung lösen',
       'Export':'Exportieren','Import':'Importieren','Reset All':'Alles zurücksetzen','Default':'Standard','Backdrop (behind overlays)':'Hintergrund (hinter Overlays)','Solid (override overlays)':'Vollflächig (Overlays überschreiben)',
-      'Reset':'Zurücksetzen','Add':'Hinzufügen','Enable':'Aktivieren','Disable':'Deaktivieren'
+      'Reset':'Zurücksetzen','Add':'Hinzufügen','Enable':'Aktivieren','Disable':'Deaktivieren',
+      'Paragraphs':'Absätze','AI Model':'KI-Modell','Model':'Modell','Refresh':'Aktualisieren','Custom image URL':'Benutzerdefinierte Bild-URL','None found':'Keine gefunden','Exclusions':'Ausschlüsse',
+      'Select…':'Auswählen…'
     },
     'it': {
       'Actions':'Azioni','Text Formatting':'Formattazione testo','Miscellaneous':'Varie',
@@ -129,7 +219,9 @@
       'Reset Text Formatting':'Reimposta formattazione testo','Background':'Sfondo','Background type':'Tipo di sfondo','Background colour':'Colore di sfondo','Backdrop opacity':'Opacità sfondo',
       'Language':'Lingua','Language override':'Lingua interfaccia','Profiles':'Profili','Profile':'Profilo','Save as new':'Salva come nuovo','Rename':'Rinomina','Duplicate':'Duplica','Delete':'Elimina','Bind to this story':'Collega a questa storia','Unbind':'Scollega',
       'Export':'Esporta','Import':'Importa','Reset All':'Reimposta tutto','Default':'Predefinito','Backdrop (behind overlays)':'Sfondo (dietro le sovrapposizioni)','Solid (override overlays)':'Solido (sovrascrive le sovrapposizioni)',
-      'Reset':'Reimposta','Add':'Aggiungi','Enable':'Attiva','Disable':'Disattiva'
+      'Reset':'Reimposta','Add':'Aggiungi','Enable':'Attiva','Disable':'Disattiva',
+      'Paragraphs':'Paragrafi','AI Model':'Modello IA','Model':'Modello','Refresh':'Aggiorna','Custom image URL':'URL immagine personalizzata','None found':'Nessuno trovato','Exclusions':'Esclusioni',
+      'Select…':'Seleziona…'
     },
     'ja': {
       'Actions':'アクション','Text Formatting':'テキストの書式','Miscellaneous':'その他',
@@ -139,7 +231,9 @@
       'Reset Text Formatting':'書式をリセット','Background':'背景','Background type':'背景タイプ','Background colour':'背景色','Backdrop opacity':'背景の不透明度',
       'Language':'言語','Language override':'UI言語','Profiles':'プロファイル','Profile':'プロファイル','Save as new':'新規保存','Rename':'名前を変更','Duplicate':'複製','Delete':'削除','Bind to this story':'このストーリーに紐付け','Unbind':'解除',
       'Export':'エクスポート','Import':'インポート','Reset All':'すべてリセット','Default':'デフォルト','Backdrop (behind overlays)':'背景（オーバーレイの後ろ）','Solid (override overlays)':'単色（オーバーレイを上書き）',
-      'Reset':'リセット','Add':'追加','Enable':'有効化','Disable':'無効化'
+      'Reset':'リセット','Add':'追加','Enable':'有効化','Disable':'無効化',
+      'Paragraphs':'段落','AI Model':'AIモデル','Model':'モデル','Refresh':'更新','Custom image URL':'カスタム画像URL','None found':'見つかりません','Exclusions':'除外',
+      'Select…':'選択…'
     },
     'ko': {
       'Actions':'작업','Text Formatting':'텍스트 서식','Miscellaneous':'기타',
@@ -149,17 +243,21 @@
       'Reset Text Formatting':'서식 초기화','Background':'배경','Background type':'배경 종류','Background colour':'배경 색상','Backdrop opacity':'배경 불투명도',
       'Language':'언어','Language override':'UI 언어','Profiles':'프로필','Profile':'프로필','Save as new':'새로 저장','Rename':'이름 바꾸기','Duplicate':'복제','Delete':'삭제','Bind to this story':'이 스토리에 연결','Unbind':'연결 해제',
       'Export':'내보내기','Import':'가져오기','Reset All':'전체 초기화','Default':'기본값','Backdrop (behind overlays)':'배경(오버레이 뒤)','Solid (override overlays)':'단색(오버레이 무시)',
-      'Reset':'재설정','Add':'추가','Enable':'활성화','Disable':'비활성화'
+      'Reset':'재설정','Add':'추가','Enable':'활성화','Disable':'비활성화',
+      'Paragraphs':'단락','AI Model':'AI 모델','Model':'모델','Refresh':'새로고침','Custom image URL':'사용자 지정 이미지 URL','None found':'없음','Exclusions':'제외 항목',
+      'Select…':'선택…'
     },
-    'pt-BR': {
+    'pt': {
       'Actions':'Ações','Text Formatting':'Formatação de texto','Miscellaneous':'Diversos',
       'Do':'Fazer','Say':'Dizer','Bold':'Negrito','Colour':'Cor','Effect':'Efeito',
-      'Main Text':'Texto principal','Speech':'Fala','Internal Monologue':'Monólogo interno','Keywords':'Palavras‑chave','Add Keyword':'Adicionar palavra‑chave',
-      'All Caps Effects':'Efeitos de CAIXA ALTA','Font':'Fonte','Font Family':'Família da fonte','Font Size':'Tamanho da fonte','Font Weight':'Espessura','Line Height':'Altura da linha','Letter Spacing':'Espaçamento entre letras','Text Alignment':'Alinhamento do texto','Reset Font':'Redefinir fonte',
-      'Reset Text Formatting':'Redefinir formatação do texto','Background':'Plano de fundo','Background type':'Tipo de plano de fundo','Background colour':'Cor do plano de fundo','Backdrop opacity':'Opacidade do fundo',
-      'Language':'Idioma','Language override':'Idioma da interface','Profiles':'Perfis','Profile':'Perfil','Save as new':'Salvar como novo','Rename':'Renomear','Duplicate':'Duplicar','Delete':'Excluir','Bind to this story':'Vincular a esta história','Unbind':'Desvincular',
-      'Export':'Exportar','Import':'Importar','Reset All':'Redefinir tudo','Default':'Padrão','Backdrop (behind overlays)':'Fundo (atrás das sobreposições)','Solid (override overlays)':'Sólido (substitui sobreposições)',
-      'Reset':'Redefinir','Add':'Adicionar','Enable':'Ativar','Disable':'Desativar'
+      'Main Text':'Texto principal','Speech':'Fala','Internal Monologue':'Monólogo interno','Italics':'Itálico','Keywords':'Palavras‑chave','Add Keyword':'Adicionar palavra‑chave',
+      'All Caps Effects':'Efeitos de MAIÚSCULAS','Font':'Tipo de letra','Font Family':'Família do tipo de letra','Font Size':'Tamanho do tipo de letra','Font Weight':'Espessura','Line Height':'Altura da linha','Letter Spacing':'Espaçamento entre letras','Text Alignment':'Alinhamento do texto','Reset Font':'Repor tipo de letra',
+      'Reset Text Formatting':'Repor formatação do texto','Background':'Fundo','Background type':'Tipo de fundo','Background colour':'Cor de fundo','Backdrop opacity':'Opacidade do fundo',
+      'Language':'Idioma','Language override':'Idioma da interface','Profiles':'Perfis','Profile':'Perfil','Save as new':'Guardar como novo','Rename':'Mudar nome','Duplicate':'Duplicar','Delete':'Eliminar','Bind to this story':'Vincular a esta história','Unbind':'Desvincular',
+      'Export':'Exportar','Import':'Importar','Reset All':'Repor tudo','Default':'Padrão','Backdrop (behind overlays)':'Fundo (atrás das sobreposições)','Solid (override overlays)':'Sólido (substitui sobreposições)',
+      'Reset':'Repor','Add':'Adicionar','Enable':'Ativar','Disable':'Desativar',
+      'Paragraphs':'Parágrafos','AI Model':'Modelo de IA','Model':'Modelo','Refresh':'Atualizar','Custom image URL':'URL de imagem personalizada','None found':'Nenhum encontrado','Exclusions':'Exclusões',
+      'Select…':'Selecionar…'
     },
     'tr': {
       'Actions':'Eylemler','Text Formatting':'Metin Biçimlendirme','Miscellaneous':'Çeşitli',
@@ -169,7 +267,21 @@
       'Reset Text Formatting':'Metin biçimlendirmeyi sıfırla','Background':'Arka plan','Background type':'Arka plan türü','Background colour':'Arka plan rengi','Backdrop opacity':'Arka plan opaklığı',
       'Language':'Dil','Language override':'Arayüz dili','Profiles':'Profiller','Profile':'Profil','Save as new':'Yeni olarak kaydet','Rename':'Yeniden adlandır','Duplicate':'Kopyala','Delete':'Sil','Bind to this story':'Bu hikayeye bağla','Unbind':'Bağlantıyı kes',
       'Export':'Dışa aktar','Import':'İçe aktar','Reset All':'Tümünü sıfırla','Default':'Varsayılan','Backdrop (behind overlays)':'Arka plan (katmanların arkasında)','Solid (override overlays)':'Katı (katmanları geçersiz kılar)',
-      'Reset':'Sıfırla','Add':'Ekle','Enable':'Etkinleştir','Disable':'Devre dışı bırak'
+      'Reset':'Sıfırla','Add':'Ekle','Enable':'Etkinleştir','Disable':'Devre dışı bırak',
+      'Paragraphs':'Paragraflar','AI Model':'Yapay Zekâ Modeli','Model':'Model','Refresh':'Yenile','Custom image URL':'Özel görsel URL\'si','None found':'Hiçbiri bulunamadı','Exclusions':'Hariç tutmalar',
+      'Select…':'Seçin…'
+    },
+    'pl': {
+      'Actions':'Akcje','Text Formatting':'Formatowanie tekstu','Miscellaneous':'Różne',
+      'Do':'Rób','Say':'Powiedz','Bold':'Pogrubienie','Colour':'Kolor','Effect':'Efekt',
+      'Main Text':'Tekst główny','Speech':'Mowa','Internal Monologue':'Monolog wewnętrzny','Italics':'Kursywa','Keywords':'Słowa kluczowe','Add Keyword':'Dodaj słowo kluczowe',
+      'All Caps Effects':'Efekty WIELKICH LITER','Font':'Czcionka','Font Family':'Rodzina czcionek','Font Size':'Rozmiar czcionki','Font Weight':'Grubość czcionki','Line Height':'Interlinia','Letter Spacing':'Odstęp między literami','Text Alignment':'Wyrównanie tekstu','Reset Font':'Resetuj czcionkę',
+      'Reset Text Formatting':'Resetuj formatowanie tekstu','Background':'Tło','Background type':'Typ tła','Background colour':'Kolor tła','Backdrop opacity':'Nieprzezroczystość tła',
+      'Language':'Język','Language override':'Język interfejsu','Profiles':'Profile','Profile':'Profil','Save as new':'Zapisz jako nowy','Rename':'Zmień nazwę','Duplicate':'Duplikuj','Delete':'Usuń','Bind to this story':'Powiąż z tą historią','Unbind':'Odwiąż',
+      'Export':'Eksportuj','Import':'Importuj','Reset All':'Resetuj wszystko','Default':'Domyślny','Backdrop (behind overlays)':'Tło (za nakładkami)','Solid (override overlays)':'Jednolity (zastępuje nakładki)',
+      'Reset':'Resetuj','Add':'Dodaj','Enable':'Włącz','Disable':'Wyłącz',
+      'Paragraphs':'Akapity','AI Model':'Model AI','Model':'Model','Refresh':'Odśwież','Custom image URL':'Niestandardowy URL obrazu','None found':'Nie znaleziono','Exclusions':'Wykluczenia',
+      'Select…':'Wybierz…'
     },
     'zh-CN': {
       'Actions':'操作','Text Formatting':'文本格式','Miscellaneous':'杂项',
@@ -179,7 +291,21 @@
       'Reset Text Formatting':'重置文本格式','Background':'背景','Background type':'背景类型','Background colour':'背景颜色','Backdrop opacity':'背景不透明度',
       'Language':'语言','Language override':'界面语言','Profiles':'配置文件','Profile':'配置文件','Save as new':'另存为新','Rename':'重命名','Duplicate':'复制','Delete':'删除','Bind to this story':'绑定到此故事','Unbind':'取消绑定',
       'Export':'导出','Import':'导入','Reset All':'全部重置','Default':'默认','Backdrop (behind overlays)':'背景（覆盖层后面）','Solid (override overlays)':'纯色（覆盖层上方）',
-      'Reset':'重置','Add':'添加','Enable':'启用','Disable':'禁用'
+      'Reset':'重置','Add':'添加','Enable':'启用','Disable':'禁用',
+      'Paragraphs':'段落','AI Model':'AI 模型','Model':'模型','Refresh':'刷新','Custom image URL':'自定义图片 URL','None found':'未找到','Exclusions':'排除项',
+      'Select…':'选择…'
+    },
+    'zh': {
+      'Actions':'操作','Text Formatting':'文本格式','Miscellaneous':'杂项',
+      'Do':'执行','Say':'说话','Bold':'粗体','Colour':'颜色','Effect':'效果',
+      'Main Text':'正文','Speech':'对话','Internal Monologue':'内心独白','Italics':'斜体','Keywords':'关键词','Add Keyword':'添加关键词',
+      'All Caps Effects':'全大写效果','Font':'字体','Font Family':'字体族','Font Size':'字号','Font Weight':'字重','Line Height':'行高','Letter Spacing':'字间距','Text Alignment':'文本对齐','Reset Font':'重置字体',
+      'Reset Text Formatting':'重置文本格式','Background':'背景','Background type':'背景类型','Background colour':'背景颜色','Backdrop opacity':'背景不透明度',
+      'Language':'语言','Language override':'界面语言','Profiles':'配置文件','Profile':'配置文件','Save as new':'另存为新','Rename':'重命名','Duplicate':'复制','Delete':'删除','Bind to this story':'绑定到此故事','Unbind':'取消绑定',
+      'Export':'导出','Import':'导入','Reset All':'全部重置','Default':'默认','Backdrop (behind overlays)':'背景（覆盖层后面）','Solid (override overlays)':'纯色（覆盖层上方）',
+      'Reset':'重置','Add':'添加','Enable':'启用','Disable':'禁用',
+      'Paragraphs':'段落','AI Model':'AI 模型','Model':'模型','Refresh':'刷新','Custom image URL':'自定义图片 URL','None found':'未找到','Exclusions':'排除项',
+      'Select…':'選擇…'
     },
     'ar': {
       'Actions':'الإجراءات','Text Formatting':'تنسيق النص','Miscellaneous':'متفرقات',
@@ -189,7 +315,9 @@
       'Reset Text Formatting':'إعادة تعيين تنسيق النص','Background':'الخلفية','Background type':'نوع الخلفية','Background colour':'لون الخلفية','Backdrop opacity':'عتامة الخلفية',
       'Language':'اللغة','Language override':'لغة الواجهة','Profiles':'الملفات الشخصية','Profile':'ملف شخصي','Save as new':'حفظ كجديد','Rename':'إعادة تسمية','Duplicate':'تكرار','Delete':'حذف','Bind to this story':'ربط بهذه القصة','Unbind':'فك الربط',
       'Export':'تصدير','Import':'استيراد','Reset All':'إعادة تعيين الكل','Default':'افتراضي','Backdrop (behind overlays)':'خلفية (خلف الطبقات)','Solid (override overlays)':'صلب (يتجاوز الطبقات)',
-      'Reset':'إعادة تعيين','Add':'إضافة','Enable':'تفعيل','Disable':'تعطيل'
+      'Reset':'إعادة تعيين','Add':'إضافة','Enable':'تفعيل','Disable':'تعطيل',
+      'Paragraphs':'الفقرات','AI Model':'نموذج الذكاء الاصطناعي','Model':'النموذج','Refresh':'تحديث','Custom image URL':'عنوان صورة مخصص','None found':'لا يوجد','Exclusions':'استثناءات',
+      'Select…':'اختر…'
     },
     'hi': {
       'Actions':'कार्य','Text Formatting':'पाठ स्वरूपण','Miscellaneous':'विविध',
@@ -199,7 +327,9 @@
       'Reset Text Formatting':'पाठ स्वरूपण रीसेट करें','Background':'पृष्ठभूमि','Background type':'पृष्ठभूमि प्रकार','Background colour':'पृष्ठभूमि रंग','Backdrop opacity':'पृष्ठभूमि अपारदर्शिता',
       'Language':'भाषा','Language override':'UI भाषा','Profiles':'प्रोफाइल','Profile':'प्रोफाइल','Save as new':'नए रूप में सहेजें','Rename':'नाम बदलें','Duplicate':'डुप्लिकेट','Delete':'हटाएँ','Bind to this story':'इस कहानी से बाँधें','Unbind':'अनबाइंड',
       'Export':'निर्यात','Import':'आयात','Reset All':'सब रीसेट','Default':'डिफ़ॉल्ट','Backdrop (behind overlays)':'पृष्ठभूमि (ओवरले के पीछे)','Solid (override overlays)':'ठोस (ओवरले को ओवरराइड)',
-      'Reset':'रीसेट','Add':'जोड़ें','Enable':'सक्षम करें','Disable':'अक्षम करें'
+      'Reset':'रीसेट','Add':'जोड़ें','Enable':'सक्षम करें','Disable':'अक्षम करें',
+      'Paragraphs':'अनुच्छेद','AI Model':'AI मॉडल','Model':'मॉडल','Refresh':'ताज़ा करें','Custom image URL':'कस्टम छवि URL','None found':'कोई नहीं मिला','Exclusions':'बहिष्करण',
+      'Select…':'चुनें…'
     },
     'id': {
       'Actions':'Aksi','Text Formatting':'Pemformatan Teks','Miscellaneous':'Lainnya',
@@ -209,7 +339,9 @@
       'Reset Text Formatting':'Atur ulang pemformatan teks','Background':'Latar belakang','Background type':'Jenis latar belakang','Background colour':'Warna latar','Backdrop opacity':'Opasitas latar',
       'Language':'Bahasa','Language override':'Bahasa antarmuka','Profiles':'Profil','Profile':'Profil','Save as new':'Simpan sebagai baru','Rename':'Ganti nama','Duplicate':'Gandakan','Delete':'Hapus','Bind to this story':'Ikat ke cerita ini','Unbind':'Lepaskan',
       'Export':'Ekspor','Import':'Impor','Reset All':'Atur ulang semua','Default':'Default','Backdrop (behind overlays)':'Latar (di balik overlay)','Solid (override overlays)':'Solid (timpa overlay)',
-      'Reset':'Atur ulang','Add':'Tambah','Enable':'Aktifkan','Disable':'Nonaktifkan'
+      'Reset':'Atur ulang','Add':'Tambah','Enable':'Aktifkan','Disable':'Nonaktifkan',
+      'Paragraphs':'Paragraf','AI Model':'Model AI','Model':'Model','Refresh':'Segarkan','Custom image URL':'URL gambar kustom','None found':'Tidak ditemukan','Exclusions':'Pengecualian',
+      'Select…':'Pilih…'
     },
     'ru': {
       'Actions':'Действия','Text Formatting':'Форматирование текста','Miscellaneous':'Прочее',
@@ -219,23 +351,68 @@
       'Reset Text Formatting':'Сбросить форматирование текста','Background':'Фон','Background type':'Тип фона','Background colour':'Цвет фона','Backdrop opacity':'Непрозрачность фона',
       'Language':'Язык','Language override':'Язык интерфейса','Profiles':'Профили','Profile':'Профиль','Save as new':'Сохранить как новый','Rename':'Переименовать','Duplicate':'Дублировать','Delete':'Удалить','Bind to this story':'Привязать к истории','Unbind':'Отвязать',
       'Export':'Экспорт','Import':'Импорт','Reset All':'Сбросить всё','Default':'По умолчанию','Backdrop (behind overlays)':'Фон (за слоями)','Solid (override overlays)':'Сплошной (поверх слоёв)',
-      'Reset':'Сброс','Add':'Добавить','Enable':'Включить','Disable':'Выключить'
+      'Reset':'Сброс','Add':'Добавить','Enable':'Включить','Disable':'Выключить',
+      'Paragraphs':'Абзацы','AI Model':'Модель ИИ','Model':'Модель','Refresh':'Обновить','Custom image URL':'Пользовательский URL изображения','None found':'Ничего не найдено','Exclusions':'Исключения',
+      'Select…':'Выбрать…'
     }
   };
-  const T=(k)=>{ try{ const raw=(settings.languageOverride&&settings.languageOverride!=='default')?settings.languageOverride:'en-US'; const lang=(raw||'en-US').replace('_','-'); const base=lang.split('-')[0]; const pack=LOCALES[lang] || LOCALES[base] || LOCALES['en-US']; return pack[k] || LOCALES['en-US'][k] || k; }catch(_){ return k; } };
-  const loadJSON = (k, fb) => { try{ const r=localStorage.getItem(k); return r?JSON.parse(r):clone(fb);}catch{ return clone(fb);} };
-  const saveJSON = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
+  const getLocalePack = (langRaw)=>{
+    try{
+      const lang=(langRaw||'en-US').replace('_','-');
+      const base=lang.split('-')[0];
+      const en=__LOCALES_ALL['en-US'] || {};
+      const active=__LOCALES_ALL[lang] || __LOCALES_ALL[base] || en;
+      return { active, fallback: en };
+    }catch(_){ return { active: (__LOCALES_ALL['en-US']||{}), fallback: {} }; }
+  };
+  const __AIDT_MISSING_I18N = new Set();
+  const T=(k)=>{ try{ const raw=(settings.languageOverride&&settings.languageOverride!=='default')?settings.languageOverride:'en-US'; const {active,fallback}=getLocalePack(raw); const val = active[k] || fallback[k]; if (val) return val; if (__aidt_isDebugEnabled && __aidt_isDebugEnabled()){ if (!__AIDT_MISSING_I18N.has(k)){ __AIDT_MISSING_I18N.add(k); try{ console.warn('[AIDT] Missing i18n key:', k, 'for', raw); }catch(_c){} } } return k; }catch(_){ return k; } };
+  // resilient storage helpers (fallback to in-memory if localStorage is blocked/quotaed)
+  const __memStore = Object.create(null);
+  const safeGet = (k)=>{ try{ return localStorage.getItem(k);}catch(_){ return __memStore[k] ?? null; } };
+  const safeSet = (k,v)=>{ try{ localStorage.setItem(k,v); }catch(_){ __memStore[k]=v; } };
+  const safeRemove = (k)=>{ try{ localStorage.removeItem(k);}catch(_){ delete __memStore[k]; } };
+  const loadJSON = (k, fb) => { try{ const r=safeGet(k); return r?JSON.parse(r):clone(fb);}catch(_){ return clone(fb);} };
+  const saveJSON = (k, v) => { try{ safeSet(k, JSON.stringify(v)); }catch(_){ } };
   const debounce  = (fn, ms)=>{ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; };
 
-  // Debug helpers disabled in production build
-  const __aidt_isDebugEnabled = ()=>false;
-  const dbg  = ()=>{};
-  const dbgw = ()=>{};
-  function __aidt_debugMarkLatest(){ }
-  function __aidt_debugDumpLatest(){ }
+  // Pause-aware observer factory that auto-registers and de-dupes observe calls
+  function createAidtObserver(callback){
+    try{
+      const mo = new MutationObserver(function(){
+        try{
+          if (window.AIDT_isPaused && window.AIDT_isPaused()) return;
+          callback.apply(null, arguments);
+        }catch(_){ }
+      });
+      try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
+      return mo;
+    }catch(_){ return new MutationObserver(callback); }
+  }
+
+  // Safe HTML replacement helper using DOM operations (avoids direct innerHTML where possible)
+  function AIDT_replaceHTML(target, html){
+    try{
+      if (!target || html==null) return;
+      if (window.AIDT_isPaused && window.AIDT_isPaused()) return;
+      try{ window.AIDT_pause && window.AIDT_pause(); }catch(_){ }
+      const tpl=document.createElement('template');
+      try{ tpl.innerHTML=String(html); }catch(_ih){ try{ target.innerHTML=String(html); return; }catch(_fb){} }
+      while (target.firstChild) { try{ target.removeChild(target.firstChild); }catch(_rm){ break; } }
+      try{ target.appendChild(tpl.content.cloneNode(true)); }catch(_ap){ try{ target.innerHTML=String(html); }catch(_fb2){} }
+    }finally{ try{ window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }
+  }
+
+  // Debug helpers (off by default; enable with localStorage 'AIDT_DEBUG' = '1' or window.__AIDT_DEBUG__ = true)
+  const __aidt_isDebugEnabled = ()=>{ try{ return window.__AIDT_DEBUG__ === true || safeGet('AIDT_DEBUG')==='1'; }catch(_){ return false; } };
+  const dbg  = function(){ if (!__aidt_isDebugEnabled()) return; try{ console.debug.apply(console, ['[AIDT]'].concat(Array.from(arguments))); }catch(_){ } };
+  const dbgw = function(){ if (!__aidt_isDebugEnabled()) return; try{ console.warn.apply(console, ['[AIDT]'].concat(Array.from(arguments))); }catch(_){ } };
+  function __aidt_debugMarkLatest(node){ if (!__aidt_isDebugEnabled()) return; try{ if (node && node.setAttribute) node.setAttribute('data-aidt-latest','1'); }catch(_){ } }
+  function __aidt_debugDumpLatest(){ if (!__aidt_isDebugEnabled()) return; try{ const n = document.querySelector('[data-aidt-latest="1"]'); console.debug('[AIDT] latest:', n); }catch(_){ } }
 
   // Ensure Default exists
   let profiles = loadJSON(LS_PROFILES, {profiles:{}});
+  try{ profiles._meta = profiles._meta || { lastModifiedAt: {} }; }catch(_){ }
   if (!profiles.profiles.Default) profiles.profiles.Default = clone(DEFAULTS);
   saveJSON(LS_PROFILES, profiles);
 
@@ -243,13 +420,13 @@
   const urlKey   = location.pathname || '';
   let bindings   = loadJSON(LS_BINDINGS, {});
   const bound    = bindings[urlKey];
-  let activeName = bound || (localStorage.getItem(ACTIVE_PROFILE) || 'Default');
-  if (!profiles.profiles[activeName]) { activeName='Default'; localStorage.setItem(ACTIVE_PROFILE,'Default'); }
+  let activeName = bound || (safeGet(ACTIVE_PROFILE) || 'Default');
+  if (!profiles.profiles[activeName]) { activeName='Default'; safeSet(ACTIVE_PROFILE,'Default'); }
   let settings   = merge(DEFAULTS, profiles.profiles[activeName] || {});
 
   // Apply last-known Paragraphs choice ASAP (before publish)
   try{
-    const lastParEarly = localStorage.getItem(lastParKeyFor(activeName)) || localStorage.getItem(LS_LAST_PARAGRAPHS);
+    const lastParEarly = safeGet(lastParKeyFor(activeName)) || safeGet(LS_LAST_PARAGRAPHS);
     if (lastParEarly && typeof lastParEarly === 'string' && lastParEarly.trim()){
       settings.paragraphs = lastParEarly;
       try{ profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES, profiles); }catch(_){ }
@@ -262,11 +439,24 @@
   publishSettings();
   try{ profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES, profiles); }catch(_){ }
 
-  const persistSettings = ()=>{ profiles=loadJSON(LS_PROFILES,{profiles:{}}); profiles.profiles[activeName]=clone(settings); saveJSON(LS_PROFILES,profiles); };
-
+  const persistSettings = ()=>{ profiles=loadJSON(LS_PROFILES,{profiles:{}}); profiles._meta = profiles._meta || { lastModifiedAt: {} }; profiles.profiles[activeName]=clone(settings); try{ profiles._meta.lastModifiedAt[activeName]=new Date().toISOString(); }catch(_){ } saveJSON(LS_PROFILES,profiles); };
+  // Periodically prune old profile metadata (keep lastModifiedAt for existing profiles only)
+  try{
+    if (!window.__AIDT_PRUNE_TIMER__){
+      window.__AIDT_PRUNE_TIMER__ = setInterval(function(){
+        try{
+          const cur = loadJSON(LS_PROFILES,{profiles:{}});
+          if (!cur || !cur._meta || !cur._meta.lastModifiedAt) return;
+          const existing = new Set(Object.keys(cur.profiles||{}));
+          Object.keys(cur._meta.lastModifiedAt).forEach(function(name){ if (!existing.has(name)) delete cur._meta.lastModifiedAt[name]; });
+          saveJSON(LS_PROFILES, cur);
+        }catch(_){ }
+      }, 10*60*1000);
+    }
+  }catch(_){ }
+  const persistSettingsDebounced = debounce(()=>{ try{ persistSettings(); }catch(_){ } }, 250);
   // Script version (for UI title)
   const SCRIPT_VERSION = (function(){ try{ return (typeof GM_info!=='undefined' && GM_info && GM_info.script && GM_info.script.version) || ''; }catch(_){ return ''; } })();
-
   // Preset colors used by dropdowns
   const COLOR_PRESETS = [
     { name:'White',        value:'#ffffff' },
@@ -294,6 +484,55 @@
     { name:'Lime',         value:'#84cc16' },
     { name:'Green',        value:'#10b981' }
   ];
+  // Theme presets (opt-in): partial settings to apply
+  const THEME_PRESETS = {
+    'Default': {
+      backgroundType: 'default',
+      textFormatting: { mainText: { colour: '#ffffff' } },
+      speech: { colour: '#ffffff' },
+      internalMonologue: { colour: '#9ca3af' },
+      italics: { colour: '#facc15' },
+      fontFamily: 'inherit',
+      fontSize: 100,
+      fontWeight: 'default',
+      lineHeight: 1.5,
+      letterSpacing: 0,
+      textAlign: 'default',
+      allCapsEffect: 'None'
+    },
+    'Noir': {
+      backgroundType: 'solid', bgColour: '#0b1220',
+      textFormatting: { mainText: { colour: '#e5e7eb' } },
+      speech: { colour: '#ffffff' },
+      internalMonologue: { colour: '#9ca3af' },
+      italics: { colour: '#facc15' },
+      fontFamily: 'Inter', lineHeight: 1.5
+    },
+    'Paperback': {
+      backgroundType: 'solid', bgColour: '#f8f5e7',
+      textFormatting: { mainText: { colour: '#1f2937' } },
+      speech: { colour: '#111827' },
+      internalMonologue: { colour: '#6b7280' },
+      italics: { colour: '#a16207' },
+      fontFamily: 'Georgia', lineHeight: 1.6, letterSpacing: 0.01, textAlign: 'left'
+    },
+    'Neon': {
+      backgroundType: 'gradient', bgGradient: 'linear-gradient(180deg,#0b1220,#0a1423)',
+      textFormatting: { mainText: { colour: '#e5e7eb' } },
+      speech: { colour: '#22d3ee' },
+      internalMonologue: { colour: '#f43f5e' },
+      italics: { colour: '#a78bfa' },
+      fontFamily: 'Inter', lineHeight: 1.5
+    },
+    'Solarized Dark': {
+      backgroundType: 'solid', bgColour: '#002b36',
+      textFormatting: { mainText: { colour: '#eee8d5' } },
+      speech: { colour: '#93a1a1' },
+      internalMonologue: { colour: '#839496' },
+      italics: { colour: '#b58900' },
+      fontFamily: 'Inter', lineHeight: 1.55
+    }
+  };
 
   // ---------------- Containers (single source of truth) ----------------
   const KNOWN_CONTAINERS = [
@@ -329,7 +568,9 @@
   // ---------------- DOM helpers ----------------
   const qsa  = (root,sel)=>{ try{ return Array.from((root||document).querySelectorAll(sel)); }catch{ return []; } };
   const qs   = (root,sel)=>{ try{ return (root||document).querySelector(sel); }catch{ return null; } };
-  const txt  = el=>{ try{ return el && typeof el.textContent==='string'?el.textContent:''; }catch{ return ''; } };
+  let __AIDT_TEXT_CACHE = new WeakMap();
+  let __AIDT_PICK_CACHE = new WeakMap();
+  const txt  = el=>{ try{ if (!el) return ''; if (__AIDT_TEXT_CACHE && __AIDT_TEXT_CACHE.has(el)) return __AIDT_TEXT_CACHE.get(el); const v=(typeof el.textContent==='string'?el.textContent:'')||''; if (__AIDT_TEXT_CACHE) __AIDT_TEXT_CACHE.set(el,v); return v; }catch{ return ''; } };
   const isEditable = el => { try{ return !!(el && el.closest && el.closest('input,textarea,[contenteditable="true"]')); }catch{ return false; } };
   const hasScript  = el => { try{ return !!(el.querySelector && el.querySelector('script,style,template,noscript')); }catch{ return true; } };
   const isVisible  = el => {
@@ -359,7 +600,6 @@
       const t=el.tagName; return ['HEAD','HTML','BODY','SCRIPT','TEMPLATE','STYLE'].includes(t);
     }catch{ return true; }
   };
-
   // ---------------- Regex rules ----------------
   // Constrain inline markers to a single line to avoid cross-paragraph captures
   const reBoldAsterisk   = /\*\*(?=\S)([^\n*]*?\S)\*\*/g;
@@ -377,19 +617,21 @@
   const reItalOpenOnlyAsterisk = /\*(?=\S)([^*\n]+?)(?=$|\n)/g;                     // *text → *text*
   const reItalOpenOnlyUnders   = /_(?=\S)([^_\n]+?)(?=$|\n)/g;                       // _text → _text_
   // Line-level IM: asterisks that wrap a sentence on its own line (no quotes)
-  const reIMLineAsterisk = /(^|\n)\*\s*([^"")][\n]*?\S)\s*\*(?=$|\n)/g;
+  // Line-level IM (no quotes): asterisks around a sentence on its own line. Avoid starting with a quote character.
+  const reIMLineAsterisk = /(^|\n)\*\s*([^"“”][^\n]*?\S)\s*\*(?=$|\n)/g;
   // Make speech auto-close only when starting a new line, to avoid mid-sentence captures
   const reSpeechOpenOnlyStr    = /(^|[\r\n])\s*"([^"\r\n]+?)\s*$/g;               // "text → "text"
-  const reSpeechOpenOnlyCurly  = /(^|[\r\n])\s*"([^"\r\n]+?)\s*$/g;                 // "text → "text"
+  // Curly-quote open-only matcher for a new line (smart quotes)
+  const reSpeechOpenOnlyCurly  = /(^|[\r\n])\s*“([^”\r\n]+?)\s*$/g;
 
   // Speech: plain quotes but not IM (supports straight and curly quotes)
   let reSpeechStraight, reSpeechCurly;
   // Require at least 2 non-space chars inside and no leading/trailing space; also block numeric inch marks (e.g., 5'8" or 3").
   try { reSpeechStraight = new RegExp('(?<![\\*0-9\'])\"(?!\s)([^\"\\n]{2,}?)(?<!\s)\"(?!\\*)','g'); }
   catch { reSpeechStraight = /(^|[^*0-9'])\"(?!\s)([^\"\n]{2,}?)(?<!\s)\"(?=[^*]|$)/g; }
-  // Curly quotes — same numeric guard
-  try { reSpeechCurly = new RegExp('(?<![\\*0-9\'])\"(?!\s)([^\"\\n]{2,}?)(?<!\s)\"(?!\\*)','g'); }
-  catch { reSpeechCurly = /(^|[^*0-9'])\"(?!\s)([^\"\n]{2,}?)(?<!\s)\"(?=[^*]|$)/g; }
+  // Curly quotes — same numeric guard, using smart quotes “ and ”
+  try { reSpeechCurly = new RegExp('(?<![\\*0-9\'])”(?!\\s)([^”\\n]{2,}?)(?<!\\s)”(?!\\*)','g'); }
+  catch { reSpeechCurly = /(^|[^*0-9'])”(?!\s)([^”\n]{2,}?)(?<!\s)”(?=[^*]|$)/g; }
 
   const reStrike  = /~~(?=\S)(.+?)(?<=\S)~~/g;
   const reCode    = /`([^`]+?)`/g;
@@ -399,19 +641,18 @@
   // Decode common HTML entities to avoid double-escaping when wrapping text extracted from HTML
   const decodeEntities = (text)=>{
     try{
-      const ta=document.createElement('textarea');
-      ta.innerHTML=String(text==null?'':text);
-      return ta.value;
-    }catch(_){
-      try{
-        return String(text==null?'':text)
-          .replace(/&amp;/g,'&')
-          .replace(/&lt;/g,'<')
-          .replace(/&gt;/g,'>')
-          .replace(/&quot;/g,'"')
-          .replace(/&#39;/g,"'");
-      }catch(__){ return String(text==null?'':text); }
-    }
+      if (!window.__AIDT_TA__){ try{ window.__AIDT_TA__=document.createElement('textarea'); }catch(_){ } }
+      const ta = window.__AIDT_TA__;
+      if (ta){ ta.innerHTML=String(text==null?'':text); return ta.value; }
+    }catch(_){ }
+    try{
+      return String(text==null?'':text)
+        .replace(/&amp;/g,'&')
+        .replace(/&lt;/g,'<')
+        .replace(/&gt;/g,'>')
+        .replace(/&quot;/g,'"')
+        .replace(/&#39;/g,"'");
+    }catch(__){ return String(text==null?'':text); }
   };
 
   const wrap = (text, cls, style)=>{
@@ -444,7 +685,6 @@
     const esc=list.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
     try{ return new RegExp('(^|[^A-Za-z])(' + esc.join('|') + ')(?=$|[^A-Za-z])','g'); }catch{ return null; }
   };
-
   // Remove existing ALL CAPS spans that now match an exclusion
   const unwrapExcludedAllCaps = ()=>{
     try{
@@ -468,9 +708,20 @@
   const MARKER_RE = /(\*\*|__|\*(?=\S)[^*]*\*|_(?=\S)[^_]*_|~~.*?~~|`[^`]+`|\^\^.*?\^\^|==.*?==|\[color=|".+?"|".+?")/;
   const CAPS_MARKER_RE = /\b[A-Z]{2,}\b/;
 
+  // Frequently used tests precompiled
+  const RE_QUOTED_SPEECH = /(["])([^"\n]+)(["])/; // "..." on a single line
+  const RE_IM_STAR = /\*(?:"|["])([\s\S]*?)(?:"|["])*\*/; // *"..."*
+  const RE_SPEECH_OR_IM = new RegExp('(' + RE_QUOTED_SPEECH.source + ')|' + RE_IM_STAR.source);
   // ---------------- Transform (IM protected via placeholders) ----------------
   const transformString = (s)=>{
     let out=s;
+
+    // Fast path: if no formatting/speech markers and no keyword/ALL-CAPS features, skip work
+    try{
+      const kwEnabled = !!((settings.textFormatting && settings.textFormatting.keywords || []).length);
+      const capsEnabled = !!(settings.allCapsEffect && settings.allCapsEffect !== 'None');
+      if (!kwEnabled && !capsEnabled && !MARKER_RE.test(s)) return s;
+    }catch(_){ }
 
     // Normalize cut-off/open-only markup before parsing (conservative)
     // 1) Close *"..." → *"..."*
@@ -528,13 +779,10 @@
     out = replaceOutsideTags(out, reBoldUnderscore, (_, t)=>wrap(t,'aidt-bold'));
     out = replaceOutsideTags(out, reItalAsterisk,   (_, t)=>wrap(t,'aidt-italic'));
     out = replaceOutsideTags(out, reItalUnderscore, (_, t)=>wrap(t,'aidt-italic'));
-
     // Highlights / colour tags
     out = replaceOutsideTags(out, reHi,     (_, a,b)=>wrap((a||b),'aidt-hi'));
     out = replaceOutsideTags(out, reColour, (_, col, inner)=>wrap(inner,'aidt-color','color:' + col));
-
     // (IM open-only handled by normalization above)
-
     // Speech on remaining quotes (not IM)
     if (settings.rSpeechWeight){
       const spStyle = 'color:' + (settings.speech.colour || '#ffffff') + ';' +
@@ -564,20 +812,30 @@
       const rawList = (settings.textFormatting && settings.textFormatting.keywords) || [];
       const list = rawList.map(k=>{
         if (!k) return null;
-        if (typeof k === 'string') return { text: k, effect: 'None', bold: false };
+        if (typeof k === 'string') return { text: k, effect: 'None', bold: false, whole: true, caseSensitive: false, regex: false };
         const t = (k.text||'').toString(); if (!t) return null;
         const eff = (k.effect||'None'); const b = !!k.bold;
-        return { text: t, effect: eff, bold: b };
+        // Simplify UI model: Smart whole-word by default; caseSensitive toggled globally via settings.textFormatting.caseSensitive if present
+        const whole = (k.whole!==false);
+        const cs = !!(k.caseSensitive || (settings.textFormatting && settings.textFormatting.caseSensitive));
+        const rx = false;
+        const color = (k.color||'');
+        return { text: t, effect: eff, bold: b, whole: whole, caseSensitive: cs, regex: rx, color: color };
       }).filter(Boolean);
       if (list.length){
         const applyKeywordsTo = (text)=>{
           let acc=text;
           for (let i=0;i<list.length;i++){
             const kw=list[i];
+            let re;
+            {
             const esc=kw.text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-            // Match whole words/phrases only: require non-word boundary around
-            // Use a captured prefix so we don't rely on lookbehind
-            const re=new RegExp('(^|[^\\\w])(' + esc + ')(?=$|[^\\\w])','gi');
+              if (kw.whole){
+                re = new RegExp('(^|[^\\\w])(' + esc + ')(?=$|[^\\\w])', kw.caseSensitive? 'g':'gi');
+              } else {
+                re = new RegExp('(' + esc + ')', kw.caseSensitive? 'g':'gi');
+              }
+            }
             const cls = 'aidt-keyword' + ((kw.effect && kw.effect!=='None')?(' aidt-eff-'+kw.effect):'');
             const colorStyle = (kw.color && typeof kw.color==='string' && kw.color!=='') ? ('color:'+kw.color+';') : '';
             const style = (kw.bold ? 'font-weight:700;' : '') + colorStyle;
@@ -585,7 +843,10 @@
               const span=document.createElement('span');
               span.className='aidt '+cls; if(style) span.setAttribute('style', style);
               span.setAttribute('data-aidt-keyword', kw.text);
-              span.textContent=hit;
+              // Support both forms: with captured prefix (whole-word) and without
+              const matched = (typeof hit==='string' && hit.length) ? hit : (m||'');
+              const content = (typeof hit==='string' && hit.length) ? hit : m;
+              span.textContent=content;
               return (pre||'') + span.outerHTML;
             });
           }
@@ -615,7 +876,6 @@
         return wrap(plain, 'aidt-im aidt-italic', imStyle);
       });
     }
-
     // All Caps Effects: wrap contiguous ALL CAPS segments when enabled
     try{
       const eff=settings.allCapsEffect||'None';
@@ -665,7 +925,11 @@
 
   // ---------------- Parser (deep text walker) ----------------
   const parseRootsDeep = ()=>{
+    const perfOn = __aidt_isDebugEnabled && __aidt_isDebugEnabled();
+    try{ if (perfOn && performance && performance.mark) performance.mark('aidt:parse:start'); }catch(_){ }
     if (!settings.enabled) return;
+
+    try{ __AIDT_TEXT_CACHE = new WeakMap(); __AIDT_PICK_CACHE = new WeakMap(); }catch(_){ __AIDT_TEXT_CACHE=null; __AIDT_PICK_CACHE=null; }
 
     const roots=getRoots();
     const kwEnabled=(settings.textFormatting.keywords||[]).length>0;
@@ -706,6 +970,7 @@
         }
       }
     }
+    try{ if (perfOn && performance && performance.mark) { performance.mark('aidt:parse:end'); performance.measure('aidt:parse', 'aidt:parse:start', 'aidt:parse:end'); } }catch(_){ }
   };
 
   const reparse    = debounce(()=>parseRootsDeep(), 50);
@@ -713,6 +978,13 @@
 
   // Parse only the latest output container (fast path for newest paragraph)
   const LATEST_SELECTORS = '#gameplay-output #do-not-copy, #do-not-copy, #gameplay-output #transition-opacity, #gameplay-output span._blw-0hover-0px, span._blw-0hover-0px, #transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], [data-testid="story-container"], span.font_heading, span.font_gameplay, p.font_gameplay, div.font_gameplay, .w_comment, .w-comment, .w_run, .w-run';
+  const OVERLAY_SELECTOR = '#gameplay-output #transition-opacity, #transition-opacity';
+  const isPageReady = ()=>{
+    try{
+      const root=document.getElementById('gameplay-output') || document.querySelector('[data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      return !!root;
+    }catch(_){ return false; }
+  };
   // Helper: return the LAST match for a selector within an optional root
   function ql(sel, root){
     try{
@@ -734,7 +1006,7 @@
         })();
         if (isEditingOutput) return;
       }catch(_){ }
-      const overlays = Array.prototype.slice.call(document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'));
+      const overlays = Array.prototype.slice.call(document.querySelectorAll(OVERLAY_SELECTOR));
       if (!overlays || !overlays.length) return;
       overlays.forEach(function(overlay){
         try{
@@ -747,9 +1019,9 @@
           let html = transformString(applyParagraphsToText(text)) || '';
           try{ html = applyParagraphsToHTML(html); }catch(_){ }
           if (html && overlay.innerHTML !== html){
-            overlay.innerHTML = html;
+            AIDT_replaceHTML(overlay, html);
             try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
           }
         }catch(_each){ }
       });
@@ -766,13 +1038,12 @@
       const textP = applyParagraphsToText(text);
       const html = transformString(textP);
       if (html && html !== text){
-        el.innerHTML = html;
+        AIDT_replaceHTML(el, html);
         try{ applyInlineSpanStyles(); }catch(_){ }
         dbg('retransformFromTextContent: replaced innerHTML from textContent');
       }
     }catch(_){ }
   }
-
   // Rebuild the split-word overlay row (transition-opacity / game-backdrop-saturate)
   // directly from its own text so the newest paragraph shows AIDT spans immediately.
   const OVERLAY_WRAP_SAFE = true; // Only disable wrapping/reparenting; allow full overlay rebuild
@@ -791,14 +1062,13 @@
       let html = transformString(applyParagraphsToText(raw)) || '';
       try{ html = applyParagraphsToHTML(html); }catch(_){ }
       if (html && container.innerHTML !== html){
-        container.innerHTML = html;
+        AIDT_replaceHTML(container, html);
         try{ applyInlineSpanStyles(); }catch(_){ }
-        try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+        try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
         dbg('rebuildOverlayFromOwnText: overlay rebuilt from its own text');
       }
     }catch(_){ }
   }
-
   // Overlay speech wrapper: scan per-word '#game-backdrop-saturate' spans and wrap
   // ranges between quote characters into a parent '.aidt-speech' span so coloring
   // applies without changing the tokenization.
@@ -857,7 +1127,6 @@
       try{ applyInlineSpanStyles(); }catch(_){ }
     }catch(_){ }
   }
-
   // Debounced, re-entrancy guarded overlay normalizer/wrapper to avoid observer loops
   function ensureOverlayWrappedOnce(root){
     try{
@@ -904,12 +1173,11 @@
             try{ applyInlineSpanStyles(); }catch(_as){}
             return;
           }
-          const t=pickTextElement(n); if(!t) return; const raw=txt(t)||''; if(!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; applyInlineSpanStyles(); }
+          const t=pickTextElement(n); if(!t) return; const raw=txt(t)||''; if(!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); applyInlineSpanStyles(); }
         }catch(_){ }
       });
     }catch(_){ }
   }
-
   // Stronger overlay normalizer: rebuild overlay from the plain text of the copy container
   function normalizeOverlay(){
     try{
@@ -927,7 +1195,7 @@
         })();
         if (isEditingOutput) return;
       }catch(_){ }
-      const overlays = Array.prototype.slice.call(document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'));
+      const overlays = Array.prototype.slice.call(document.querySelectorAll(OVERLAY_SELECTOR));
       if (!overlays || !overlays.length) return;
       overlays.forEach(function(overlay){
         try{
@@ -940,9 +1208,9 @@
           let html = transformString(applyParagraphsToText(text)) || '';
           try{ html = applyParagraphsToHTML(html); }catch(_){ }
           if (html && overlay.innerHTML !== html){
-            overlay.innerHTML = html;
+            AIDT_replaceHTML(overlay, html);
             try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
           }
         }catch(_each){ }
       });
@@ -953,8 +1221,9 @@
     try{
       const root = document.getElementById('gameplay-output') || document.body;
       if (!root) return;
-      const rebalance = debounce(()=>{ try{ if (window.__AIDT_PAUSE__) return; bulkNormalizeOverlays(); }catch(_){ } }, 120);
-      const mo = new MutationObserver(function(muts){
+      const rebalance = debounce(()=>{ try{ if (window.AIDT_isPaused && window.AIDT_isPaused()) return; if (window.__AIDT_PAUSE__) return; bulkNormalizeOverlays(); }catch(_){ } }, 120);
+      if (window.__AIDT_OVERLAY_OBSERVER__) return;
+      const mo = createAidtObserver(function(muts){
         try{
           for (var i=0;i<muts.length;i++){
             var m=muts[i];
@@ -963,18 +1232,18 @@
         }catch(_){ }
       });
       mo.observe(root, {childList:true, subtree:true, characterData:true});
+      try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
       try{ window.__AIDT_OVERLAY_OBSERVER__ = mo; }catch(_){ }
     }catch(_){ }
   }
-
   // Normalize all overlay rows at once (play.aidungeon multiple paragraphs)
   function bulkNormalizeOverlays(){
     try{
-      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
-      try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
+      try{ if ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__) return; }catch(_){ }
+      try{ window.AIDT_pause && window.AIDT_pause(); window.__AIDT_PAUSE__ = true; }catch(_){ }
       // Temporarily disconnect observer to avoid loops
       try{ if (window.__AIDT_OVERLAY_OBSERVER__) window.__AIDT_OVERLAY_OBSERVER__.disconnect(); }catch(_){ }
-      const list = document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity');
+      const list = document.querySelectorAll(OVERLAY_SELECTOR);
       const nearestCopyFor = (overlay)=>{
         try{
           let n = overlay.previousElementSibling;
@@ -1000,18 +1269,18 @@
           if (html && overlay.innerHTML !== html){
             overlay.innerHTML = html;
             try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} }catch(_){ }
+            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
           }
         }catch(_){ }
       }
       // Re-attach observer after batch
       try{ setupOverlayObserver(); }catch(_){ }
-      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; }catch(__){} }
+      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(__){} }
     }catch(_){ }
   }
   const parseWithinRoot = (root, force)=>{
     if (!settings.enabled || !root || isDanger(root)) return;
-    try{ if (!force && window.__AIDT_PAUSE__) return; }catch(_){ }
+    try{ if (!force && ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__)) return; }catch(_){ }
     // Do not parse inside a live contenteditable to preserve editing interactions
     try{ if (!force && isWithinEditable(root)) return; }catch(_){ }
     const kwEnabled=(settings.textFormatting.keywords||[]).length>0;
@@ -1044,6 +1313,7 @@
   // Prefer visible gameplay text elements, not inside copy-overlay containers
   function pickTextElement(container){
     try{
+      if (__AIDT_PICK_CACHE && __AIDT_PICK_CACHE.has(container)) return __AIDT_PICK_CACHE.get(container);
       // If the given container is the highlight/saturate overlay (split into per-word spans),
       // prefer the hidden copy container which holds full paragraph HTML.
       try{
@@ -1058,12 +1328,12 @@
             if (localCopy){ alt = localCopy.querySelector('span.font_gameplay, p.font_gameplay, div.font_gameplay'); }
           }catch(_){ }
           if (!alt){ alt = document.querySelector('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay'); }
-          if (alt) return alt;
+          if (alt){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, alt); return alt; }
           // Fallback: use the copy container itself if a specific child wasn't found
           const copy = (container.parentNode && container.parentNode.querySelector) ? (container.parentNode.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #do-not-copy, #do-not-copy')) : document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
           // If copy container is currently being edited, return it directly (avoid replacing HTML while typing)
           try{ if (copy && copy.querySelector && copy.querySelector('[contenteditable="true"]')) return copy; }catch(_){ }
-          if (copy) return copy;
+          if (copy){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, copy); return copy; }
         }
       }catch(_){ }
       const candidates = container.querySelectorAll('span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
@@ -1073,9 +1343,9 @@
         if (el.querySelector && el.querySelector('#game-backdrop-saturate')) continue;
         // Prefer non-editable nodes for formatting; if editable, skip
         try{ if (el.closest && el.closest('[contenteditable="true"]')) continue; }catch(_){ }
-        if (el.closest && !el.hasAttribute('aria-hidden')) return el;
+        if (el.closest && !el.hasAttribute('aria-hidden')){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, el); return el; }
       }
-      return candidates[0] || container;
+      const out=candidates[0] || container; if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, out); return out;
     }catch(_){ return container; }
   }
   // Fallback finder: last visible gameplay text element anywhere
@@ -1104,14 +1374,14 @@
         const rawHTML = String(textEl.innerHTML || '');
         if (rawHTML){
           const outHTML = transformString(rawHTML);
-          if (outHTML && outHTML !== rawHTML){ textEl.innerHTML = outHTML; applyInlineSpanStyles(); }
+          if (outHTML && outHTML !== rawHTML){ AIDT_replaceHTML(textEl, outHTML); applyInlineSpanStyles(); }
         } else {
           const html = transformString(t);
-          if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); }
+          if (html && html !== t){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); }
         }
       }catch(_){
         const html = transformString(t);
-        if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); }
+        if (html && html !== t){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); }
       }
       // Convert existing italic HTML quotes to IM spans if site already removed asterisks
       try{
@@ -1133,7 +1403,7 @@
           const loose = /\*\s*([""][^\n]*?[""])\s*\*/g;
           if (loose.test(raw)){
             const html2 = transformString(raw.replace(loose, '*$1*'));
-            if (html2 && html2 !== raw){ textEl.innerHTML = html2; applyInlineSpanStyles(); }
+            if (html2 && html2 !== raw){ AIDT_replaceHTML(textEl, html2); applyInlineSpanStyles(); }
           }
         }
       }catch(_){ }
@@ -1144,7 +1414,8 @@
   }
   const parseLatestOutput = ()=>{
     try{
-      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
+      if (!isPageReady()) return;
+      try{ if ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__) return; }catch(_){ }
       // If user is actively editing, avoid re-rendering the newest paragraph to preserve caret/clicks
       try{ if (isEditingActive()) return; }catch(_){ }
       // Prefer the LAST overlay row on the page, as beta renders multiple '#transition-opacity' entries
@@ -1159,7 +1430,7 @@
         try{ rebuildOverlayFromOwnText(preferred); overlayWrapSpeech(preferred); }catch(_){ }
         // Ensure styles apply immediately on the newest paragraph
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline'); }catch(_e){}
-        try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do'); } }catch(_e){}
+        try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do'); } }catch(_e){}
         // Fallback: When quotes are split across multiple nodes, speech/IM may be missed.
         // Transform only the text-bearing child to avoid changing row structure/icons.
         try{
@@ -1176,7 +1447,7 @@
           if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
             let html = transformString(applyParagraphsToText(text));
             try{ html = applyParagraphsToHTML(html); }catch(_){ }
-            if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
+            if (html && html !== text){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); }
           } else if (!hasVisibleDesc(textEl,'.aidt-im')) {
             finalizeLatestOnce(textEl);
           }
@@ -1197,7 +1468,7 @@
         if (!fallbackEl) return;
         try{ if (!isEditingActive()) parseWithinRoot(fallbackEl, true); }catch(_){ }
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (fallback)'); }catch(_e){}
-        try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (fallback)'); } }catch(_e){}
+        try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (fallback)'); } }catch(_e){}
         try{
           const textEl = fallbackEl;
           const hasSpeechSpans = !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
@@ -1207,7 +1478,7 @@
             let html = transformString(applyParagraphsToText(text));
             try{ html = applyParagraphsToHTML(html); }catch(_){ }
             dbg('parseLatestOutput: transformed=', html!==text);
-            if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
+            if (html && html !== text){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); }
           }
         }catch(_e){}
         return;
@@ -1217,7 +1488,7 @@
       try{ if (!isEditingActive()) parseWithinRoot(latest, true); }catch(_){ }
       try{ rebuildOverlayFromOwnText(latest); overlayWrapSpeech(latest); ensureOverlayWrappedOnce(latest); }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (no preferred)'); }catch(_e){}
-      try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (no preferred)'); } }catch(_e){}
+      try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (no preferred)'); } }catch(_e){}
       try{
         const textEl = (latest && latest.querySelector) ? pickTextElement(latest) : latest;
         dbg('parseLatestOutput: fallback textEl chosen=', !!textEl, 'len=', (txt(textEl)||'').length);
@@ -1230,7 +1501,7 @@
         if ((!hasIMSpan && hasIMPattern) || (!hasSpeechSpan && hasSpeechPattern)){
           let html = transformString(applyParagraphsToText(text));
           try{ html = applyParagraphsToHTML(html); }catch(_){ }
-          if (html && html !== text){ textEl.innerHTML = html; applyInlineSpanStyles(); }
+          if (html && html !== text){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); }
         } else if (!hasVisibleDesc(textEl,'.aidt-im')) {
           finalizeLatestOnce(textEl);
         }
@@ -1244,10 +1515,10 @@
       try{ syncOverlayFromCopy(); normalizeOverlay(); }catch(_){ }
     }catch{}
   };
-
   // Strong finalizer for newest paragraph: combines parsing + inline transform
   function ensureLatestFormatted(){
     try{
+      if (!isPageReady()) return;
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       try{ if (isEditingActive()) return; }catch(_){ }
       // Prefer the LAST overlay row on the page
@@ -1270,10 +1541,10 @@
         if (rawNow && !(textEl.innerHTML||'').match(/class=\"aidt/)){
           let htmlNow = transformString(applyParagraphsToText(rawNow)) || '';
           try{ htmlNow = applyParagraphsToHTML(htmlNow); }catch(_){ }
-          if (htmlNow && htmlNow !== rawNow){ textEl.innerHTML = htmlNow; }
+          if (htmlNow && htmlNow !== rawNow){ AIDT_replaceHTML(textEl, htmlNow); }
         }
       }catch(_){ }
-      try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
+      try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
       try{
         const hasSpans = !!(textEl.querySelector && textEl.querySelector('.aidt-speech, .aidt-im'));
         const t = getBaselineTextFor(textEl, txt(textEl));
@@ -1282,7 +1553,7 @@
           let html = transformString(applyParagraphsToText(t)) || '';
           try{ html = applyParagraphsToHTML(html); }catch(_){ }
           dbg('ensureLatestFormatted: transformed=', html!==t);
-          if (html && html !== t){ textEl.innerHTML = html; applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
+          if (html && html !== t){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
         }
         __aidt_debugMarkLatest(container || textEl, textEl);
         syncOverlayFromCopy();
@@ -1298,8 +1569,9 @@
   // Format all target elements (full sweep like content.js)
   const formatAllTargetElements = ()=>{
     try{
-      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
-      try{ window.__AIDT_PAUSE__ = true; }catch(_){ }
+      if (!isPageReady()) return;
+      try{ if ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__) return; }catch(_){ }
+      try{ window.AIDT_pause && window.AIDT_pause(); window.__AIDT_PAUSE__ = true; }catch(_){ }
       const preferred = document.getElementById('gameplay-output');
       if (preferred){
         const nodes = preferred.querySelectorAll(LATEST_SELECTORS);
@@ -1307,28 +1579,27 @@
           try{
             const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
             if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
-            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; }
+            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
           }catch(_){ }
         });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
-        try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); } }catch(_e){}
+        try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); } }catch(_e){}
       } else {
         const nodes = document.querySelectorAll(LATEST_SELECTORS);
         nodes.forEach(n=>{
           try{
             const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
             if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
-            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ t.innerHTML=html; }
+            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
           }catch(_){ }
         });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
-        try{ if (typeof AIDT_applySayDo === 'function') { AIDT_applySayDo(document); } }catch(_e){}
+        try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); } }catch(_e){}
       }
       try{ bulkNormalizeOverlays(); }catch(_){ }
-      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; }catch(__){} }
+      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(__){} }
     }catch{}
   };
-
   // Dedicated observer: mirrors content.js flush-on-change behavior
   function setupFormatObserver(){
     let pending=false;
@@ -1337,21 +1608,33 @@
     const attachLatestObserver=()=>{
       try{
         // Prefer the LAST overlay row on the page
-        let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
+        let preferred = (function(){ try{ const list=document.querySelectorAll(OVERLAY_SELECTOR); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
                         document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
                         document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
-        const candidate = preferred || (document.querySelectorAll(LATEST_SELECTORS)||[])[(document.querySelectorAll(LATEST_SELECTORS)||[]).length-1];
+        const candidate = preferred || (!isPageReady()? null : (document.querySelectorAll(LATEST_SELECTORS)||[])[(document.querySelectorAll(LATEST_SELECTORS)||[]).length-1]);
         if (!candidate || candidate===latestTarget) return;
         if (latestMo) { try{ latestMo.disconnect(); }catch(_){}; latestMo=null; }
         latestTarget=candidate;
-        latestMo=new MutationObserver(()=>{ try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["]([^"\n]+)["])|\*(?:"|["])([\s\S]*?)(?:"|["])\*/.test(tx)){ let h = transformString(applyParagraphsToText(tx)) || ''; try{ h = applyParagraphsToHTML(h); }catch(_){ } if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){} });
+        latestMo=createAidtObserver(()=>{ try{ wantFormat=true; if (!pending){ pending=true; queueMicrotask(flush); } }catch(_e){} });
+        try{ window.__AIDT_OBS_SET__ = window.__AIDT_OBS_SET__ || new WeakSet(); if (!window.__AIDT_OBS_SET__.has(latestTarget)) window.__AIDT_OBS_SET__.add(latestTarget); }catch(_){ }
         latestMo.observe(latestTarget,{childList:true,subtree:true,characterData:true});
+        try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(latestMo); }catch(_){ }
         // Immediate pass on attach
-        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && /(["]([^"\n]+)["])|\*(?:"|["])([\s\S]*?)(?:"|["])\*/.test(tx)){ let h = transformString(applyParagraphsToText(tx)) || ''; try{ h = applyParagraphsToHTML(h); }catch(_){ } if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
+        try{ const t=pickTextElement(latestTarget); parseWithinRoot(t, true); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} try{ const has=t && t.querySelector && t.querySelector('.aidt-speech, .aidt-im'); const tx=txt(t); if (!has && RE_SPEECH_OR_IM.test(tx)){ let h = transformString(applyParagraphsToText(tx)) || ''; try{ h = applyParagraphsToHTML(h); }catch(_){ } if(h&&h!==tx){ t.innerHTML=h; applyInlineSpanStyles(); } } }catch(_e2){} }catch(_e){}
       }catch(_){ }
     };
     const flush=()=>{
       try{
+        try{
+          if (document && document.visibilityState === 'hidden'){
+            pending=false;
+            const onVis=()=>{ try{ document.removeEventListener('visibilitychange', onVis); queueMicrotask(flush); }catch(_){ } };
+            try{ document.addEventListener('visibilitychange', onVis, { once:true }); }catch(_){ }
+            return;
+          }
+        }catch(_){ }
+        __AIDT_TEXT_CACHE = new WeakMap();
+        __AIDT_PICK_CACHE = new WeakMap();
         if (wantFormat){
           // Fast path newest + full sweep, then reapply spans
           parseLatestOutput();
@@ -1363,11 +1646,13 @@
         }
       }finally{ pending=false; wantFormat=false; }
     };
-    const mo=new MutationObserver(muts=>{
+    if (window.__AIDT_FORMAT_ROOT_OBSERVER__) try{ window.__AIDT_FORMAT_ROOT_OBSERVER__.disconnect(); }catch(_d){}
+    const mo=createAidtObserver(muts=>{
       try{
         for (let i=0;i<muts.length;i++){
           const m=muts[i];
           if (m.type==='childList'){
+            if (!isPageReady()) continue;
             if ((m.addedNodes && m.addedNodes.length>0)) wantFormat=true;
           } else if (m.type==='characterData'){
             // Character data inside our targets triggers formatting
@@ -1383,49 +1668,75 @@
       }catch{}
     });
     try{
+      window.__AIDT_OBS_SET__ = window.__AIDT_OBS_SET__ || new WeakSet();
+      const markObserved=(el)=>{ try{ if (el) window.__AIDT_OBS_SET__.add(el); }catch(_){ } };
+      const isObserved=(el)=>{ try{ return el && window.__AIDT_OBS_SET__.has(el); }catch(_){ return false; } };
       const preferred=document.getElementById('gameplay-output');
       if (preferred) {
         mo.observe(preferred,{childList:true,subtree:true,characterData:true});
+        try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
         const priors = preferred.querySelectorAll(LATEST_SELECTORS);
-        priors.forEach(el=>{ try{ mo.observe(el,{childList:true,subtree:true,characterData:true}); }catch(_){} });
+        priors.forEach(el=>{ try{ if (!isObserved(el)){ markObserved(el); mo.observe(el,{childList:true,subtree:true,characterData:true}); } }catch(_){} });
       } else {
         const targets=document.querySelectorAll(LATEST_SELECTORS);
-        if (targets && targets.length){ targets.forEach(el=>{ try{ mo.observe(el,{childList:true,subtree:true,characterData:true}); }catch(_){} }); }
+        if (targets && targets.length){ targets.forEach(el=>{ try{ if (!isObserved(el)){ markObserved(el); mo.observe(el,{childList:true,subtree:true,characterData:true}); } }catch(_){} }); }
         else { mo.observe(document.body,{childList:true,subtree:true,characterData:true}); }
+        try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
       }
+      window.__AIDT_FORMAT_ROOT_OBSERVER__ = mo;
     }catch{}
     // Initial attach
     try{ attachLatestObserver(); }catch(_e){}
     return mo;
   }
-
   // ---------------- Styles (UI + spans) ----------------
   (function css(){
-    const s=document.createElement('style');
-    s.textContent =
-      '.aidt-bold{font-weight:700}' +
-      '.aidt-italic{font-style:italic}' +
-      '.aidt-speech{}' +
-      '.aidt-im{}' +
-      // Note: do not hide aria-hidden gameplay nodes; some flows temporarily set aria-hidden on the latest paragraph
-      '.aidt-strike{text-decoration:line-through;opacity:.9}' +
-      '.aidt-code{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(0,0,0,.12);padding:0 .25em;border-radius:3px}' +
-      '.aidt-hi{background:rgba(255,255,0,.28);padding:0 .1em;border-radius:2px}' +
-      '.aidt-color{padding:0 .08em;border-radius:2px}' +
-      '.aidt-keyword{background:transparent;padding:0;border-radius:0;font-weight:inherit}' +
-
-      // Effects (apply to ALL CAPS and Keyword spans)
-      '.aidt-allcaps.aidt-eff-Flash, .aidt-keyword.aidt-eff-Flash{animation:aidt-flash 1.2s linear infinite; display:inline-block}' +
-      '@keyframes aidt-flash{0%,100%{opacity:1}50%{opacity:.45}}' +
-      '.aidt-allcaps.aidt-eff-Strobe, .aidt-keyword.aidt-eff-Strobe{animation:aidt-strobe .25s steps(2,end) infinite; display:inline-block}' +
-      '@keyframes aidt-strobe{0%{opacity:1}50%{opacity:.2}100%{opacity:1}}' +
-      '.aidt-allcaps.aidt-eff-Rainbow, .aidt-keyword.aidt-eff-Rainbow{animation:aidt-rainbow 2.2s linear infinite; display:inline-block; will-change:filter}' +
-      '@keyframes aidt-rainbow{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}' +
-      '.aidt-allcaps.aidt-eff-Wave, .aidt-keyword.aidt-eff-Wave{animation:aidt-wave 2.5s ease-in-out infinite; display:inline-block}' +
-      '@keyframes aidt-wave{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}' +
-      '.aidt-allcaps.aidt-eff-Breathe, .aidt-keyword.aidt-eff-Breathe{animation:aidt-breathe 3s ease-in-out infinite; display:inline-block}' +
-      '@keyframes aidt-breathe{0%,100%{letter-spacing:inherit}50%{letter-spacing:.02em}}';
-    document.head.appendChild(s);
+    try{
+      const cssText =
+        '.aidt-bold{font-weight:700}' +
+        '.aidt-italic{font-style:italic}' +
+        '.aidt-speech{}' +
+        '.aidt-im{}' +
+        // Note: do not hide aria-hidden gameplay nodes; some flows temporarily set aria-hidden on the latest paragraph
+        '.aidt-strike{text-decoration:line-through;opacity:.9}' +
+        '.aidt-code{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(0,0,0,.12);padding:0 .25em;border-radius:3px}' +
+        '.aidt-hi{background:rgba(255,255,0,.28);padding:0 .1em;border-radius:2px}' +
+        '.aidt-color{padding:0 .08em;border-radius:2px}' +
+        '.aidt-keyword{background:transparent;padding:0;border-radius:0;font-weight:var(--aidt-kw-weight,inherit);color:var(--aidt-kw-color, inherit)!important}' +
+        '.aidt-scope{color:var(--aidt-base-color,inherit)!important;font-weight:var(--aidt-base-weight,inherit)!important}' +
+        // CSS variables for dynamic colors/weights (reduces per-element inline writes)
+        ':root{--aidt-speech-color:#ffffff;--aidt-speech-weight:400;--aidt-say-color:var(--aidt-speech-color,#ffffff);--aidt-say-weight:var(--aidt-speech-weight,400);--aidt-im-color:#9ca3af;--aidt-im-weight:400;--aidt-it-color:#facc15;--aidt-it-weight:400}' +
+        '.aidt-speech{color:var(--aidt-speech-color,#ffffff)!important;font-weight:var(--aidt-speech-weight,400)!important}' +
+        '.w_comment .aidt-speech, .w-comment .aidt-speech{color:var(--aidt-say-color,var(--aidt-speech-color,#ffffff))!important;font-weight:var(--aidt-say-weight,var(--aidt-speech-weight,400))!important}' +
+        '.aidt-im, .ai-italic-speech, em.ai-italic-speech{color:var(--aidt-im-color,#9ca3af)!important;font-weight:var(--aidt-im-weight,400)!important}' +
+        '.aidt-italic:not(.aidt-im){color:var(--aidt-it-color,#facc15)!important;font-weight:var(--aidt-it-weight,400)!important}' +
+        '@media (prefers-reduced-motion: no-preference){' +
+        '.aidt-allcaps.aidt-eff-Flash, .aidt-keyword.aidt-eff-Flash{animation:aidt-flash 1.2s linear infinite; display:inline-block}' +
+        '.aidt-allcaps.aidt-eff-Strobe, .aidt-keyword.aidt-eff-Strobe{animation:aidt-strobe .25s steps(2,end) infinite; display:inline-block}' +
+        '.aidt-allcaps.aidt-eff-Rainbow, .aidt-keyword.aidt-eff-Rainbow{animation:aidt-rainbow 2.2s linear infinite; display:inline-block; will-change:filter}' +
+        '.aidt-allcaps.aidt-eff-Wave, .aidt-keyword.aidt-eff-Wave{animation:aidt-wave 2.5s ease-in-out infinite; display:inline-block}' +
+        '.aidt-allcaps.aidt-eff-Breathe, .aidt-keyword.aidt-eff-Breathe{animation:aidt-breathe 3s ease-in-out infinite; display:inline-block}' +
+        '}' +
+        '@keyframes aidt-flash{0%,100%{opacity:1}50%{opacity:.45}}' +
+        '@keyframes aidt-strobe{0%{opacity:1}50%{opacity:.2}100%{opacity:1}}' +
+        '@keyframes aidt-rainbow{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}' +
+        '@keyframes aidt-wave{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}' +
+        '@keyframes aidt-breathe{0%,100%{letter-spacing:inherit}50%{letter-spacing:.02em}}';
+      if (document.adoptedStyleSheets && typeof CSSStyleSheet !== 'undefined' && 'replaceSync' in CSSStyleSheet.prototype){
+        try{
+          if (!window.__AIDT_SHEET__) window.__AIDT_SHEET__ = new CSSStyleSheet();
+          window.__AIDT_SHEET__.replaceSync(cssText);
+          const sheets = document.adoptedStyleSheets || [];
+          if (sheets.indexOf(window.__AIDT_SHEET__) === -1){ document.adoptedStyleSheets = sheets.concat(window.__AIDT_SHEET__); }
+        }catch(_){ }
+      } else {
+        let s=document.getElementById('aidt-inline-css');
+        if (!s){ s=document.createElement('style'); s.id='aidt-inline-css'; document.head.appendChild(s); }
+        s.textContent = cssText;
+      }
+    }catch(_){
+      try{ let s=document.getElementById('aidt-inline-css'); if (!s){ s=document.createElement('style'); s.id='aidt-inline-css'; document.head.appendChild(s);} }catch(__){}
+    }
   })();
 
   // ---------------- Apply global + instant restyle ----------------
@@ -1438,6 +1749,8 @@
       imgs.forEach(function(img){
         try{
           if (!img) return;
+          // If we've already hidden this image, skip to avoid attribute observer loops
+          if (img.getAttribute && img.getAttribute('data-aidt-ambience-disabled') === '1') return;
           img.setAttribute('data-aidt-ambience-disabled','1');
           try{ if (!img.getAttribute('data-aidt-ambience-orig-src') && img.src){ img.setAttribute('data-aidt-ambience-orig-src', img.src); } }catch(_save){}
           try{ img.style.setProperty('display','none','important'); }catch(_d){}
@@ -1463,6 +1776,44 @@
     }catch(_){ }
   }
 
+  // Visible-only formatting using IntersectionObserver (lazy format offscreen)
+  function setupVisibleFormatObserver(){
+    try{
+      if (window.__AIDT_VISIBLE_IO__) return window.__AIDT_VISIBLE_IO__;
+      if (typeof IntersectionObserver !== 'function') return null;
+      window.__AIDT_IO_SEEN__ = window.__AIDT_IO_SEEN__ || new WeakSet();
+      const io = new IntersectionObserver((entries)=>{
+        try{
+          if (!settings || !settings.enabled) return;
+          if (document.visibilityState === 'hidden') return;
+          for (let i=0;i<entries.length;i++){
+            const e = entries[i];
+            if (!e || !e.isIntersecting) continue;
+            const el = e.target;
+            try{ window.__AIDT_IO_SEEN__ && window.__AIDT_IO_SEEN__.add(el); }catch(_s){}
+            // Format intersecting target immediately
+            try{ parseWithinRoot(el, true); }catch(_p){}
+            try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_a){}
+            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document); } }catch(_sd){}
+          }
+        }catch(_cb){}
+      }, { root:null, rootMargin:'200px 0px', threshold:0 });
+      window.__AIDT_VISIBLE_IO__ = io;
+      try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(io); }catch(_){ }
+      return io;
+    }catch(_){ return null; }
+  }
+  function attachVisibleObserver(){
+    try{
+      const io = setupVisibleFormatObserver(); if (!io) return;
+      const seen = (window.__AIDT_IO_SEEN__) || new WeakSet();
+      const preferred = document.getElementById('gameplay-output');
+      const nodes = preferred ? preferred.querySelectorAll(LATEST_SELECTORS) : document.querySelectorAll(LATEST_SELECTORS);
+      if (!nodes || !nodes.length) return;
+      nodes.forEach(n=>{ try{ if (!seen.has(n)) { seen.add(n); io.observe(n); } }catch(_e){} });
+    }catch(_){ }
+  }
+
   function attachAmbienceObserver(){
     try{
       if (window.__AIDT_AMBIENCE_OBSERVER__) return;
@@ -1471,8 +1822,10 @@
       const mo = new MutationObserver(function(){
         try{ ensureAmbienceSuppressed(); }catch(_){ }
       });
-      mo.observe(root, { childList:true, subtree:true, attributes:true, attributeFilter:['src','srcset','style','class'] });
+      // Avoid watching 'style' to prevent loops from our own style writes
+      mo.observe(root, { childList:true, subtree:true, attributes:true, attributeFilter:['src','srcset','class'] });
       window.__AIDT_AMBIENCE_OBSERVER__ = mo;
+      try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
     }catch(_){ }
   }
 
@@ -1495,12 +1848,17 @@
       }
     }catch(_){ }
   }
-
+  let __AIDT_BG_SCHED__ = false;
   const applyBackground = ()=>{
     const type=settings.backgroundType||'default';
     const colour=settings.bgColour||'#111827';
     const opacityPct = (typeof settings.bgOpacity==='number'?settings.bgOpacity:50);
     const imgUrl=(settings.bgImageUrl||'').trim();
+    const gradient=(settings.bgGradient||'').trim();
+    const imgSize=(settings.bgImageSize||'cover');
+    const imgPos=(settings.bgImagePos||'center center');
+    const imgRepeat=(settings.bgImageRepeat||'no-repeat');
+    const imgAttach=(settings.bgImageAttach||'scroll');
     const clamp=(n)=> Math.max(0, Math.min(100, isNaN(n)?100:n));
     const o= clamp(opacityPct)/100;
     const rgbHexToRgba=(hex,alpha)=>{
@@ -1511,8 +1869,13 @@
     };
     const solidVal = colour;
     const backdropVal = rgbHexToRgba(colour,o);
-    const val= (type==='solid') ? solidVal : (type==='backdrop'?backdropVal:(type==='image'?('url("'+imgUrl+'")[cover]') : ''));
-    try{
+    // Apply-time sanitization
+    const safeUrl = (s)=>{ try{ const u=new URL(s, location.href); return (u.protocol==='http:'||u.protocol==='https:') ? u.href : ''; }catch(_){ return ''; } };
+    const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (!/^(linear-gradient|radial-gradient|conic-gradient)\(/i.test(t)) return ''; if (/url\s*\(/i.test(t)) return ''; if (/var\s*\(/i.test(t)) return ''; return t; }catch(_){ return ''; } };
+    const gradSafe = safeGrad(gradient);
+    const urlSafe  = safeUrl(imgUrl);
+    const val= (type==='solid') ? solidVal : (type==='backdrop'?backdropVal:(type==='gradient'?gradSafe:(type==='image'?(urlSafe?('url("'+urlSafe+'")[cover]'):'') : '')));
+    const writeBatch=()=>{
       BG_CONTAINERS.forEach(sel=>{
         const el=qs(document,sel); if(!el) return;
         if(type==='default'){
@@ -1537,10 +1900,12 @@
             return;
           }
         }
-        if(type==='image'){
+        if(type==='gradient'){
+          try{ if (gradSafe){ el.style.setProperty('background', gradSafe, 'important'); el.style.setProperty('background-color','transparent','important'); } }catch(_){ }
+        } else if(type==='image'){
           try{ el.style.removeProperty('background'); }catch(_rmB){}
           try{ el.style.setProperty('background-color','transparent','important'); }catch(_bc){}
-          try{ el.style.setProperty('background-image', 'url("'+imgUrl+'")', 'important'); el.style.setProperty('background-size','cover','important'); el.style.setProperty('background-position','center center','important'); el.style.setProperty('background-repeat','no-repeat','important'); }catch(_){ }
+          try{ if (urlSafe){ el.style.setProperty('background-image', 'url("'+urlSafe+'")', 'important'); el.style.setProperty('background-size',imgSize,'important'); el.style.setProperty('background-position',imgPos,'important'); el.style.setProperty('background-repeat',imgRepeat,'important'); el.style.setProperty('background-attachment',imgAttach,'important'); } }catch(_){ }
         } else {
           el.style.setProperty('background', val, 'important');
           el.style.setProperty('background-color', val, 'important');
@@ -1548,7 +1913,8 @@
           else el.style.removeProperty('background-image');
         }
       });
-    }catch(_){ }
+    };
+    try{ (window.requestAnimationFrame||setTimeout)(()=>writeBatch(), 16); }catch(_){ writeBatch(); }
     // After applying backgrounds, suppress ambience image when needed
     try{ if (type==='solid' || (type==='image' && !!settings.bgImageInFront)){ ensureAmbienceSuppressed(); attachAmbienceObserver(); } }catch(_){ }
     try{
@@ -1557,14 +1923,20 @@
         document.documentElement.style.removeProperty('background-color');
         document.documentElement.style.removeProperty('background-image');
       } else {
-        if (type==='image'){
+        if (type==='gradient'){
+          try{
+            if (gradSafe){ document.documentElement.style.setProperty('background', gradSafe, 'important'); }
+            document.documentElement.style.removeProperty('background-image');
+          }catch(_){ }
+        } else if (type==='image'){
           try{
             document.documentElement.style.removeProperty('background');
             document.documentElement.style.removeProperty('background-color');
-            document.documentElement.style.setProperty('background-image','url("'+imgUrl+'")','important');
-            document.documentElement.style.setProperty('background-size','cover','important');
-            document.documentElement.style.setProperty('background-position','center center','important');
-            document.documentElement.style.setProperty('background-repeat','no-repeat','important');
+            if (urlSafe){ document.documentElement.style.setProperty('background-image','url("'+urlSafe+'")','important'); }
+            document.documentElement.style.setProperty('background-size',imgSize,'important');
+            document.documentElement.style.setProperty('background-position',imgPos,'important');
+            document.documentElement.style.setProperty('background-repeat',imgRepeat,'important');
+            document.documentElement.style.setProperty('background-attachment',imgAttach,'important');
           }catch(_){ }
         } else {
           document.documentElement.style.setProperty('background', val, 'important');
@@ -1612,17 +1984,32 @@
 
   function scheduleBackgroundApply(){
     try{
-      if (BG_APPLIED_ONCE) return;
-      const type = (settings.backgroundType||'default');
-      if (type==='default') return; // nothing to do
-      if (type==='image' && !(settings.bgImageUrl||'').trim()) return;
-      const uiReady = document.readyState==='complete';
-      const hasTargets = !!document.querySelector('#gameplay-output, #do-not-copy, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
-      if (uiReady && hasTargets){ applyBackground(); return; }
-      setTimeout(scheduleBackgroundApply, 180);
-    }catch(_){ setTimeout(scheduleBackgroundApply, 200); }
+      // Keyed scheduler to dedupe retries to one per frame with fallback backoff
+      window.__AIDT_SCHED__ = window.__AIDT_SCHED__ || Object.create(null);
+      const key='bg-apply';
+      if (window.__AIDT_SCHED__[key]) return;
+      const run=()=>{
+        try{
+          window.__AIDT_SCHED__[key]=null; delete window.__AIDT_SCHED__[key];
+          if (BG_APPLIED_ONCE) return;
+          const type=(settings.backgroundType||'default');
+          if (type==='default') return;
+          if (type==='image' && !(settings.bgImageUrl||'').trim()) return;
+          const uiReady=document.readyState==='complete';
+          const hasTargets=!!document.querySelector('#gameplay-output, #do-not-copy, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+          if (uiReady && hasTargets){ applyBackground(); return; }
+          // Retry with increasing delay up to 1s
+          window.__AIDT_SCHED_BACKOFF__ = window.__AIDT_SCHED_BACKOFF__ || Object.create(null);
+          const cur = Math.min( (window.__AIDT_SCHED_BACKOFF__[key]||120) * 1.5, 1000 );
+          window.__AIDT_SCHED_BACKOFF__[key] = cur;
+          setTimeout(scheduleBackgroundApply, cur|0);
+        }catch(_){ setTimeout(scheduleBackgroundApply, 200); }
+      };
+      window.__AIDT_SCHED__[key] = true;
+      const raf=(typeof requestAnimationFrame==='function')?requestAnimationFrame:null;
+      if (raf) raf(()=>run()); else setTimeout(run, 16);
+    }catch(_){ }
   }
-
   const applyFontsAndEffects = ()=>{
     const roots=getRoots();
     const eff=settings.allCapsEffect||'None';
@@ -1642,6 +2029,7 @@
       ];
       const hit=wanted.find(w=>fam===w.key);
       if (hit && !document.querySelector('link[data-aidt-font="'+hit.key+'"]')){
+        try{ if (!document.querySelector('link[rel="preconnect"][href^="https://fonts.gstatic.com"]')){ const p=document.createElement('link'); p.rel='preconnect'; p.href='https://fonts.gstatic.com'; p.crossOrigin='anonymous'; document.head.appendChild(p); } }catch(_){ }
         const l=document.createElement('link'); l.rel='stylesheet'; l.href=hit.url; l.setAttribute('data-aidt-font', hit.key); document.head.appendChild(l);
       }
     }catch(_){ }
@@ -1682,7 +2070,6 @@
       }catch{}
     });
   };
-
   const applyBaseText = ()=>{
     const roots=getRoots();
     const mt=(settings.textFormatting && settings.textFormatting.mainText)||{bold:false, colour:'#ffffff'};
@@ -1693,8 +2080,19 @@
       (settings.fontWeight==='regular')? '400' : '';
     roots.forEach(el=>{ try{
       if (el===document.body || el===document.documentElement) return;
-      el.style.color = (mt.colour && mt.colour!==DEFAULTS.textFormatting.mainText.colour) ? mt.colour : '';
-      el.style.fontWeight=baseWeight;
+      // Prefer CSS variables to reduce style churn
+      if (mt.colour && mt.colour!==DEFAULTS.textFormatting.mainText.colour){
+        try{ el.style.removeProperty('color'); }catch(_){ }
+        el.style.setProperty('--aidt-base-color', mt.colour, 'important');
+      } else {
+        try{ el.style.removeProperty('--aidt-base-color'); }catch(_){ }
+      }
+      if (baseWeight){
+        try{ el.style.removeProperty('font-weight'); }catch(_){ }
+        el.style.setProperty('--aidt-base-weight', baseWeight, 'important');
+      } else {
+        try{ el.style.removeProperty('--aidt-base-weight'); }catch(_){ }
+      }
     }catch{} });
   };
 
@@ -1708,43 +2106,58 @@
         (settings.fontWeight==='medium') ? '500' :
         (settings.fontWeight==='regular')? '400' : '';
       if (mt.colour && mt.colour!==DEFAULTS.textFormatting.mainText.colour){
-        target.style.setProperty('color', mt.colour, 'important');
+        try{ target.style.removeProperty('color'); }catch(_){ }
+        target.style.setProperty('--aidt-base-color', mt.colour, 'important');
       }
-      if (baseWeight){ target.style.setProperty('font-weight', baseWeight, 'important'); }
+      if (baseWeight){ try{ target.style.removeProperty('font-weight'); }catch(_){ } target.style.setProperty('--aidt-base-weight', baseWeight, 'important'); }
       dbg('applyBaseTextToElement: applied to node');
     }catch(_){ }
   }
 
   // Update existing inline spans (Speech/IM) and apply SAY overrides inside w_comment
+  let __AIDT_INLINE_SCHED__ = false;
   const applyInlineSpanStyles = ()=>{
+    if (__AIDT_INLINE_SCHED__) return;
+    __AIDT_INLINE_SCHED__ = true;
+    const _sched = (typeof requestAnimationFrame==='function') ? requestAnimationFrame : (cb)=>setTimeout(cb,16);
+    _sched(()=>{ try{ applyInlineSpanStylesNow(); } finally { __AIDT_INLINE_SCHED__ = false; } });
+  };
+  function applyInlineSpanStylesNow(){
+    const perfOn = __aidt_isDebugEnabled && __aidt_isDebugEnabled();
+    try{ if (perfOn && performance && performance.mark) performance.mark('aidt:inline:start'); }catch(_){ }
     if (!settings.enabled) return;
+    // Per-frame memoized setter to avoid redundant inline style writes
+    const setIfChanged = (el, prop, value)=>{
+      try{
+        const cur = el.style.getPropertyValue(prop);
+        if (cur === value) return;
+        el.style.setProperty(prop, value, 'important');
+      }catch(_){ }
+    };
     const spCol = settings.speech.colour || '#ffffff';
     const spW   = settings.speech.bold ? '700' : '';
     const sayCol= settings.actions.say.colour || spCol;
     const sayW  = settings.actions.say.bold ? '700' : spW;
 
-    document.querySelectorAll('.aidt-speech').forEach(el=>{
-      try{
-        const inSay = el.closest('.w_comment, .w-comment');
-        el.style.setProperty('color', (inSay ? sayCol : spCol), 'important');
-        el.style.setProperty('font-weight', (inSay ? sayW : spW) || '400', 'important');
-      }catch{}
-    });
+    try{
+      const root=document.documentElement;
+      setIfChanged(root, '--aidt-speech-color', spCol);
+      setIfChanged(root, '--aidt-speech-weight', (spW||'400'));
+      // Defaults for say vars equal speech; containers will override
+      setIfChanged(root, '--aidt-say-color', spCol);
+      setIfChanged(root, '--aidt-say-weight', (spW||'400'));
+    }catch(_){ }
+    try{ document.querySelectorAll('.w_comment, .w-comment').forEach(c=>{ try{ c.style.setProperty('--aidt-say-color', sayCol, 'important'); c.style.setProperty('--aidt-say-weight', (sayW||'400'), 'important'); }catch(_c){} }); }catch(_){ }
 
     const imCol = settings.internalMonologue.colour || '#9ca3af';
     const imW   = settings.internalMonologue.bold ? '700' : '';
-    document.querySelectorAll('.aidt-im, .ai-italic-speech, em.ai-italic-speech').forEach(el=>{ try{ el.style.setProperty('color', imCol, 'important'); el.style.setProperty('font-weight', imW || '400', 'important'); }catch{} });
+    try{ const root=document.documentElement; setIfChanged(root, '--aidt-im-color', imCol); setIfChanged(root, '--aidt-im-weight', (imW||'400')); }catch(_){ }
 
     // Italics (unquoted) color/weight
     try{
       const itCol = settings.italics.colour || '#facc15';
       const itW   = settings.italics.bold ? '700' : '';
-      document.querySelectorAll('.aidt-italic:not(.aidt-im)').forEach(el=>{
-        try{
-          el.style.setProperty('color', itCol, 'important');
-          el.style.setProperty('font-weight', itW || '400', 'important');
-        }catch(_){ }
-      });
+      try{ const root=document.documentElement; setIfChanged(root, '--aidt-it-color', itCol); setIfChanged(root, '--aidt-it-weight', (itW||'400')); }catch(_){ }
     }catch(_){ }
 
     // Heuristic: treat full-line italic blocks as IM and tint them
@@ -1755,7 +2168,7 @@
         const words=s.split(/\s+/).length;
         return words>=3 || /[\.\!\?]$/.test(s);
       };
-      document.querySelectorAll('.aidt-italic:not(.aidt-im)').forEach(el=>{
+      (getRoots()).forEach(root=>{ qsa(root,'.aidt-italic:not(.aidt-im)').forEach(el=>{
         try{
           if (el.closest('.aidt-speech')) return; // do not tint italics inside speech
           const t=(el.textContent||'').trim(); if(!looksLikeSentence(t)) return;
@@ -1763,22 +2176,21 @@
           const ptxt=(parent.textContent||'').trim();
           if (ptxt===t){ // italic is the sole content of the block
             el.classList.add('ai-italic-speech');
-            el.style.setProperty('color', imCol, 'important');
-            el.style.setProperty('font-weight', imW || '400', 'important');
+            // rely on CSS variables via class
           }
         }catch(_){ }
-      });
+      }); });
     }catch(_){ }
 
     // Update ALL CAPS effect classes instantly
     try{
       const eff=settings.allCapsEffect||'None';
-      document.querySelectorAll('.aidt-allcaps, .aidt-keyword').forEach(el=>{
+      (getRoots()).forEach(root=>{ qsa(root,'.aidt-allcaps, .aidt-keyword').forEach(el=>{
         try{
           el.classList.remove('aidt-eff-Flash','aidt-eff-Strobe','aidt-eff-Rainbow','aidt-eff-Wave','aidt-eff-Breathe');
           if (eff && eff!=='None') el.classList.add('aidt-eff-'+eff);
         }catch(_){ }
-      });
+      }); });
     }catch(_){ }
 
     // Update keyword spans instantly based on stored data
@@ -1791,10 +2203,10 @@
         else map.set((k.text||'').toLowerCase(), {effect:(k.effect||'None'), bold:!!k.bold, color:(k.color||null)});
       });
       // Ensure older keyword spans get data attribute
-      document.querySelectorAll('span.aidt-keyword:not([data-aidt-keyword])').forEach(el=>{
+      (getRoots()).forEach(root=>{ qsa(root,'span.aidt-keyword:not([data-aidt-keyword])').forEach(el=>{
         try{ el.setAttribute('data-aidt-keyword', (el.textContent||'').trim()); }catch(_){ }
-      });
-      const allKeywordSpans = Array.from(document.querySelectorAll('span.aidt-keyword[data-aidt-keyword]'));
+      }); });
+      const allKeywordSpans = (function(){ const acc=[]; (getRoots()).forEach(root=>{ acc.push(...qsa(root,'span.aidt-keyword[data-aidt-keyword]')); }); return acc; })();
       allKeywordSpans.forEach(el=>{
         try{
           const key=(el.getAttribute('data-aidt-keyword')||'').toLowerCase();
@@ -1808,8 +2220,8 @@
           el.style.removeProperty('color');
           if (cfg){
             if (cfg.effect && cfg.effect!=='None') el.classList.add('aidt-eff-'+cfg.effect);
-            if (cfg.bold) el.style.fontWeight='700';
-            if (cfg.color && typeof cfg.color==='string'){ el.style.setProperty('color', cfg.color, 'important'); }
+            if (cfg.bold) el.style.setProperty('--aidt-kw-weight','700','important');
+            if (cfg.color && typeof cfg.color==='string'){ el.style.setProperty('--aidt-kw-color', cfg.color, 'important'); }
             // Ensure Rainbow is visible on near-white text by giving a vivid base color
             try{
               if (cfg.effect==='Rainbow'){
@@ -1831,8 +2243,7 @@
         }catch(_){ }
       });
     }catch(_){ }
-  };
-
+  }
   // Paragraph formatting
   function applyParagraphsToHTML(html){
     try{
@@ -1923,7 +2334,6 @@
       return out.indexOf('\n')>=0 ? out.replace(/\n/g,'<br/>') : out;
     }catch(_){ return html; }
   }
-
   function applyParagraphsToText(text){
     try{
       const mode=(settings.paragraphs||'default');
@@ -2023,6 +2433,7 @@
       }
 
     }catch(_){ }
+    try{ if (perfOn && performance && performance.mark) { performance.mark('aidt:inline:end'); performance.measure('aidt:inline', 'aidt:inline:start', 'aidt:inline:end'); } }catch(_){ }
   };
 
   function disableTweaks(){
@@ -2034,6 +2445,7 @@
     }catch(_){ }
   }
   const applyGlobal = ()=>{
+    try{ window.__AIDT_PAUSE__ = !settings.enabled; }catch(_){ }
     if(!settings.enabled){ disableTweaks(); return; }
     applyFontsAndEffects();
     applyBaseText();
@@ -2053,7 +2465,9 @@
   function buildPanel(){
     if (panelAPI) return panelAPI;
 
-    const host=document.createElement('div');
+    // Ensure a single panel host (guard against double-injection on SPA re-inits)
+    try{ const old=document.getElementById('aidt-panel-host'); if (old && old.parentNode){ old.parentNode.removeChild(old); } }catch(_){ }
+    const host=document.createElement('div'); host.id='aidt-panel-host';
     host.style.all='initial'; host.style.position='fixed'; host.style.right='18px'; host.style.bottom='18px'; host.style.zIndex='2147483647'; host.style.pointerEvents='none';
     document.documentElement.appendChild(host);
     const root=host.attachShadow({mode:'open'});
@@ -2063,7 +2477,7 @@
       ':host{all:initial;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;pointer-events:none}' +
       '.btn{all:initial;display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;padding:10px 12px;border-radius:999px;border:1px solid rgba(148,163,184,.35);background:#1e2430;color:#e5e7eb;font:500 13px system-ui;pointer-events:auto}' +
       '.btn:hover{background:#1b2230}' +
-      '.btn,.ghost,.reset,.tab{transition:transform .12s ease, filter .12s ease}' +
+      '.btn,.ghost,.reset,.tab{transition:transform .12s ease, filter .12s ease; outline: none}' +
       '.btn:active,.ghost:active,.reset:active,.tab:active{transform:translateY(1px) scale(.98);filter:brightness(.92)}' +
       '.panel{all:initial;position:fixed;right:0;bottom:46px;width:520px;max-width:95vw;max-height:78vh;border-radius:14px;border:1px solid rgba(148,163,184,.35);background:#252b36;color:#e5e7eb;backdrop-filter:blur(6px);box-shadow:0 10px 30px rgba(0,0,0,.45);display:none;overflow:hidden;font:13px system-ui}' +
       '@media (max-width: 640px){ .btn{ position: fixed; right: 12px; bottom: 92px; z-index: 2147483647; } }' +
@@ -2072,9 +2486,9 @@
       '.header-actions{display:flex;align-items:center;gap:10px}' +
       '.left-actions{display:flex;align-items:center;gap:10px}' +
       '.title{font-size:14px;font-weight:700;position:absolute;left:50%;transform:translateX(-50%)}' +
-      '.ghost{all:initial;font:13px system-ui;color:#e5e7eb;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#1b2230;padding:6px 10px;cursor:pointer}' +
+      '.ghost{all:initial;font:13px system-ui;color:#e5e7eb;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#1b2230;padding:6px 10px;cursor:pointer; outline: none}' +
       '.ghost:hover{background:#1a212e}' +
-      '.tabs{display:flex;gap:10px;padding:10px 10px 0;justify-content:center;align-items:center}' +
+      '.tabs{position:sticky;top:0;z-index:1;display:flex;gap:10px;padding:10px 10px 0;justify-content:center;align-items:center;background:linear-gradient(180deg,rgba(37,43,54,1),rgba(37,43,54,.85))}' +
       '.tab{all:initial;cursor:pointer;padding:8px 12px;border-radius:10px;border:1px solid transparent;color:#cbd5e1;transition:background-color .15s,color .15s,border-color .15s;outline:none;font:600 13px system-ui;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}' +
       '.tab:active{transform:translateY(1px) scale(.98)}' +
       '.tab:hover{background:#0b1220;color:#e5e7eb;border-color:rgba(148,163,184,.35)}' +
@@ -2086,18 +2500,51 @@
       '.group h4{margin:0 0 8px 0;font-size:12px;letter-spacing:.02em;color:#cbd5e1;text-transform:uppercase}' +
       '.row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:6px 4px}' +
       '.row.is-disabled{opacity:.5;filter:grayscale(25%)}' +
+      '.row.is-disabled .btn,.row.is-disabled .ghost,.row.is-disabled .reset,.row.is-disabled .tab,' +
+      '.row.is-disabled select,.row.is-disabled input[type="color"],.row.is-disabled input[type="range"],.row.is-disabled input[type="text"],' +
+      '.row.is-disabled .switch{pointer-events:none;filter:none;transform:none}' +
       '.row+.row{border-top:1px dashed rgba(51,65,85,.5)}' +
-      'select,input[type="color"],input[type="range"],input[type="text"]{all:initial;font:13px system-ui;color:#e5e7eb;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#0f1622;padding:6px 8px;min-width:140px}' +
+      'select,input[type="color"],input[type="range"],input[type="text"]{all:initial;font:13px system-ui;color:#e5e7eb;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:#0f1622;padding:6px 8px;min-width:140px; outline: none}' +
       'input[type="range"]{width:180px} input[type="text"]{width:200px}' +
       '.switch{all:initial;display:inline-flex;width:42px;height:24px;border-radius:999px;background:#334155;position:relative;border:1px solid rgba(148,163,184,.35);cursor:pointer}' +
       '.switch[data-on="true"]{background:#16a34a}.knob{position:absolute;top:1px;left:1px;width:20px;height:20px;border-radius:50%;background:#e5e7eb;transition:left .15s}' +
       '.switch:active .knob{transform:scale(.95)}' +
       '.switch[data-on="true"] .knob{left:21px}' +
-      '.reset{all:initial;cursor:pointer;border:1px solid rgba(148,163,184,.35);background:#0b1220;border-radius:8px;padding:4px 8px;color:#e5e7eb}' +
+      '.reset{all:initial;cursor:pointer;border:1px solid rgba(148,163,184,.35);background:#0b1220;border-radius:8px;padding:4px 8px;color:#e5e7eb; outline: none}' +
+      // Keyboard-only focus indicators using :focus-visible
+      '.btn:focus-visible,.ghost:focus-visible,.reset:focus-visible{box-shadow:0 0 0 2px rgba(59,130,246,.45)}' +
+      'select:focus-visible,input[type="color"]:focus-visible,input[type="range"]:focus-visible,input[type="text"]:focus-visible{box-shadow:0 0 0 2px rgba(59,130,246,.45)}' +
       '.actions{display:flex;gap:8px;justify-content:flex-end;padding-top:8px;flex-wrap:wrap}' +
+      '.actions.equal button{flex:1 1 140px}' +
+      '.actions.act-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;justify-content:stretch}' +
+      '.actions.act-grid-2{display:grid;grid-template-columns:repeat(2,minmax(160px,1fr));gap:8px;justify-content:stretch}' +
       '.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}' +
       '.chip{display:inline-flex;align-items:center;gap:6px;background:#0f1622;border:1px solid rgba(148,163,184,.35);border-radius:999px;padding:4px 8px}' +
-      '.chip button{all:initial;cursor:pointer;border:1px solid rgba(148,163,184,.35);border-radius:8px;padding:2px 6px;color:#e5e7eb;background:#0f1622}';
+      '.chip button{all:initial;cursor:pointer;border:1px solid rgba(148,163,184,.35);border-radius:8px;padding:2px 6px;color:#e5e7eb;background:#0f1622}' +
+      '.chip .lbl{display:inline-flex;align-items:center;gap:6px}' +
+      '#row-bg-image-opts{grid-template-columns:1fr auto}' +
+      '.imgopt-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start;justify-items:start}' +
+      '.imgopt-grid .cell{display:flex;flex-direction:column;gap:4px}' +
+      '.imgopt-grid .cell .lbl{font-size:12px;color:#cbd5e1}' +
+      '.imgopt-grid select{text-align:left}' +
+      '#row-bg-image-opts .imgopt-grid{grid-column:2 / 3;justify-self:end}' +
+      '#row-bg-image-opts .imgopt-grid select{width:auto;min-width:160px;box-sizing:border-box;align-self:flex-start}' +
+      '@media (max-width: 800px){ #row-bg-image-opts .imgopt-grid{grid-template-columns:1fr} }' +
+      '@media (max-width: 480px){ #row-bg-image-opts .imgopt-grid{grid-template-columns:1fr} }' +
+      '.sr-only{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important;white-space:nowrap!important}' +
+      // Mobile ergonomics: ensure 44px+ touch targets on coarse pointers
+      '@media (pointer: coarse){' +
+        ' .btn,.ghost,.reset,.tab,select,input[type="color"],input[type="range"],input[type="text"]{min-height:44px}' +
+        ' .tab{padding:12px 14px}' +
+        ' .ghost,.reset{padding:10px 12px}' +
+        ' .switch{width:50px;height:28px}' +
+        ' .switch .knob{width:24px;height:24px;top:1px;left:1px}' +
+        ' .switch[data-on="true"] .knob{left:25px}' +
+        ' .header{padding:12px}' +
+        ' .tabs{gap:12px}' +
+        ' .row{gap:10px}' +
+      '}' +
+      '@media (prefers-reduced-motion: reduce){ .btn,.ghost,.reset,.tab{transition:none!important} .switch .knob{transition:none!important} }';
     root.appendChild(style);
 
     const btn=document.createElement('button'); btn.className='btn'; btn.textContent='AIDT ⚙️'; btn.style.pointerEvents='auto'; root.appendChild(btn);
@@ -2105,139 +2552,222 @@
     try{ if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches){ btn.style.position='fixed'; btn.style.right='12px'; btn.style.bottom='92px'; btn.style.zIndex='2147483647'; } }catch(_){ }
 
     const panel=document.createElement('div'); panel.className='panel';
-    panel.innerHTML =
-      '<div class="header"><div class="left-actions"><button id="close" class="ghost">✕</button></div><div class="title">AI Dungeon Tweaks'+ (SCRIPT_VERSION?(' - v'+SCRIPT_VERSION):'') +'</div><div class="header-actions"><div id="sw-enabled" class="switch"><div class="knob"></div></div></div></div>' +
-      '<div class="tabs" role="tablist">' +
-        '<button class="tab" role="tab" aria-selected="true" data-tab="actions">'+T('Actions')+'</button>' +
-        '<button class="tab" role="tab" aria-selected="false" data-tab="format">'+T('Text Formatting')+'</button>' +
-        '<button class="tab" role="tab" aria-selected="false" data-tab="misc">'+T('Miscellaneous')+'</button>' +
-      '</div>' +
-      '<div class="sections">' +
+    try{
+      const raw=(settings.languageOverride&&settings.languageOverride!=='default')?settings.languageOverride:'en-US';
+      const base=(raw||'').split('-')[0].toLowerCase();
+      const rtlLangs=new Set(['ar','he','fa','ur']);
+      panel.setAttribute('dir', rtlLangs.has(base)?'rtl':'ltr');
+    }catch(_){ }
+    // Header (safe DOM)
+    const header=document.createElement('div'); header.className='header';
+    const left=document.createElement('div'); left.className='left-actions';
+    const btnClose=document.createElement('button'); btnClose.id='close'; btnClose.className='ghost'; btnClose.textContent='✕'; btnClose.setAttribute('aria-label','Close'); left.appendChild(btnClose);
+    const title=document.createElement('div'); title.className='title'; title.textContent='AI Dungeon Tweaks'+(SCRIPT_VERSION?(' - v'+SCRIPT_VERSION):'');
+    const hact=document.createElement('div'); hact.className='header-actions';
+    const swEn=document.createElement('div'); swEn.id='sw-enabled'; swEn.className='switch'; swEn.title=T('Enable'); swEn.innerHTML='<div class="knob"></div>';
+    hact.appendChild(swEn);
+    header.appendChild(left); header.appendChild(title); header.appendChild(hact);
+    panel.appendChild(header);
+    // Tabs (safe DOM)
+    const tabsEl=document.createElement('div'); tabsEl.className='tabs'; tabsEl.setAttribute('role','tablist');
+    const mkTab=(key,label)=>{ const b=document.createElement('button'); b.className='tab'; b.setAttribute('role','tab'); b.setAttribute('aria-selected','false'); b.setAttribute('data-tab',key); b.setAttribute('aria-controls','aidt-section-'+key); b.id='aidt-tab-'+key; b.textContent=label; b.title=label; return b; };
+    tabsEl.appendChild(mkTab('actions', T('Actions')));
+    tabsEl.appendChild(mkTab('format', T('Text Formatting')));
+    tabsEl.appendChild(mkTab('misc',   T('Miscellaneous')));
+    panel.appendChild(tabsEl);
+    // Sections (existing HTML string kept for now)
+    const sectionsEl=document.createElement('div'); sectionsEl.className='sections';
+    const live=document.createElement('div'); live.className='sr-only'; live.setAttribute('aria-live','polite'); live.id='aidt-live'; sectionsEl.appendChild(live);
+    const desc=document.createElement('p'); desc.className='sr-only'; desc.id='aidt-desc'; desc.textContent='Settings dialog. Press Tab to navigate. Press Escape to close.'; sectionsEl.appendChild(desc);
+    sectionsEl.innerHTML=
+      '<section id="aidt-section-actions" class="section" data-section="actions" role="tabpanel" aria-labelledby="aidt-tab-actions">'+
+        '<div class="group"><h4>'+T('Do')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-do-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-do-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-do-colour" type="color" value="#ffffff"/><button id="rst-do-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-do-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Say')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-say-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-say-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-say-colour" type="color" value="#ffffff"/><button id="rst-say-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-say-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+      '</section>'+
+      '<section id="aidt-section-format" class="section" data-section="format" role="tabpanel" aria-labelledby="aidt-tab-format">'+
+        '<div class="group"><h4>'+T('Main Text')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-main-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-main-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-main-colour" type="color" value="#ffffff"/><button id="rst-main-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-main-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Speech')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-sp-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-sp-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-sp-colour" type="color"/><button id="rst-sp-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-sp-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Internal Monologue')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-im-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-im-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-im-colour" type="color"/><button id="rst-im-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-im-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Italics')+'</h4><div class="row"><span>'+T('Bold')+'</span><div id="sw-it-bold" class="switch"><div class="knob"></div></div><span></span></div><div class="row"><span>'+T('Colour')+'</span><select id="dd-it-presets" class="presets"></select></div><div class="row"><span></span><input id="sel-it-colour" type="color"/><button id="rst-it-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-it-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Keywords')+'</h4><div class="row"><span>'+T('Add Keyword')+'</span><input id="tf-keyword-input" type="text" placeholder="Type a keyword or phrase…"/><button id="tf-keyword-add" class="reset" title="'+T('Add')+'">＋</button></div><div id="tf-keyword-chips" class="chips"></div><div class="actions"><button id="rst-kw-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('All Caps Effects')+'</h4><div class="row"><span>'+T('Effect')+'</span><select id="dd-effects"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option></select><span></span></div><div class="row"><span>'+T('Exclusions')+'</span><input id="tf-caps-ex-input" type="text" placeholder="HQ, CEO, NASA…"/><button id="tf-caps-ex-add" class="reset" title="'+T('Add')+'">＋</button></div><div id="tf-caps-ex-chips" class="chips"></div><div class="actions"><button id="rst-caps-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Font')+'</h4><div class="row"><span>'+T('Font Family')+'</span><select id="dd-font-family"><option value="inherit">Default (inherit)</option><option value="system-sans">System Sans</option><option value="system-mono">Monospace (System)</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Inter">Inter</option><option value="Roboto">Roboto</option><option value="Open Sans">Open Sans</option><option value="Nunito">Nunito</option><option value="Merriweather">Merriweather</option><option value="Lora">Lora</option><option value="JetBrains Mono">JetBrains Mono</option><option value="Fira Code">Fira Code</option><option value="Source Code Pro">Source Code Pro</option><option value="Courier New">Courier New</option><option value="custom">Custom (Google Fonts URL)</option></select><button id="rst-font-family" class="reset" title="Reset">↺</button></div><div class="row" id="row-font-url" style="display:none"><span>'+T('Custom Google Fonts URL')+'</span><input id="tf-font-url" type="text" placeholder="https://fonts.googleapis.com/css2?family=...&display=swap"/><button id="btn-font-apply" class="ghost" title="'+T('Apply')+'">'+T('Apply')+'</button></div><div class="row"><span>'+T('Font Size')+'</span><input id="rng-font-size" type="range" min="80" max="160" step="1"/><button id="rst-font-size" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Font Weight')+'</span><select id="dd-font-weight"><option value="default">Default</option><option value="regular">Regular (400)</option><option value="medium">Medium (500)</option><option value="bold">Bold (700)</option></select><button id="rst-font-weight" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Line Height')+'</span><input id="rng-line-height" type="range" min="1.1" max="2.0" step="0.05"/><button id="rst-line-height" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Letter Spacing')+'</span><input id="rng-letter-spacing" type="range" min="-0.05" max="0.2" step="0.005"/><button id="rst-letter-spacing" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Text Alignment')+'</span><select id="dd-text-align"><option value="default">Default</option><option value="left">Left</option><option value="justify">Justify</option></select><button id="rst-text-align" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Paragraphs')+'</span><select id="dd-paragraphs"><option value="default">Default</option><option value="basic">Basic</option><option value="newline">New Line</option></select><button id="rst-paragraphs" class="reset" title="'+T('Reset')+'">↺</button></div><div class="actions"><button id="rst-font-block" class="ghost">'+T('Reset Font')+'</button></div></div>'+
+        '<div class="actions"><button id="rst-formatting" class="ghost">Reset Text Formatting</button></div>'+
+      '</section>'+
+      '<section id="aidt-section-misc" class="section" data-section="misc" role="tabpanel" aria-labelledby="aidt-tab-misc">'+
+        '<div class="group"><h4>'+T('Background')+'</h4><div class="row"><span>'+T('Background type')+'</span><select id="dd-bg-type"><option value="default">'+T('Default')+'</option><option value="backdrop">'+T('Backdrop (behind overlays)')+'</option><option value="solid">'+T('Solid (override overlays)')+'</option><option value="gradient">Gradient</option><option value="image">'+T('Custom image URL')+'</option></select><button id="rst-bg-type" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Background colour')+'</span><input id="sel-bg-colour" type="color"/><button id="rst-bg-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Backdrop opacity')+'</span><input id="rng-bg-opacity" type="range" min="0" max="100" step="1"/><button id="rst-bg-opacity" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row" id="row-bg-gradient" style="display:none"><span>'+T('Gradient')+'</span><input id="tf-bg-gradient" type="text" placeholder="linear-gradient(180deg,#0b1220,#0a1423)"/><span></span></div><div class="row" id="row-bg-image" style="display:none"><span>'+T('Image URL')+'</span><input id="tf-bg-image" type="text" placeholder="https://..."/><span></span></div><div class="row" id="row-bg-image-opts" style="display:none"><span>'+T('Image Options')+'</span><div class="imgopt-grid"><div class="cell"><span class="lbl">'+T('Size')+'</span><select id="dd-bg-size"><option value="cover">cover</option><option value="contain">contain</option><option value="auto">auto</option></select></div><div class="cell"><span class="lbl">'+T('Position')+'</span><select id="dd-bg-pos"><option value="center center">center</option><option value="top center">top</option><option value="bottom center">bottom</option></select></div><div class="cell"><span class="lbl">'+T('Repeat')+'</span><select id="dd-bg-repeat"><option value="no-repeat">no-repeat</option><option value="repeat">repeat</option><option value="repeat-x">repeat-x</option><option value="repeat-y">repeat-y</option></select></div><div class="cell"><span class="lbl">'+T('Attachment')+'</span><select id="dd-bg-attach"><option value="scroll">scroll</option><option value="fixed">fixed</option></select></div></div></div><div class="actions"><button id="rst-bg-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Theme Presets')+'</h4><div class="row"><span>'+T('Preset')+'</span><select id="dd-theme"><option value="">'+T('Select…')+'</option><option>Default</option><option>Noir</option><option>Paperback</option><option>Neon</option><option>Solarized Dark</option></select><button id="btn-apply-theme" class="ghost" title="'+T('Apply')+'">'+T('Apply')+'</button></div></div>'+
+        ''+
+        '<div class="group"><h4>'+T('Language')+'</h4><div class="row"><span>'+T('Language override')+'</span><select id="dd-lang"><option value="default">'+T('Default')+'</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="es">Español</option><option value="it">Italiano</option><option value="pt-BR">Português (Brasil)</option><option value="pt">Português</option><option value="tr">Türkçe</option><option value="pl">Polski</option><option value="ru">Русский</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh-CN">简体中文</option><option value="zh">中文</option><option value="ar">العربية</option><option value="hi">हिन्दी</option><option value="id">Bahasa Indonesia</option></select><span></span></div></div>'+
+        '<div class="group"><h4>'+T('Profiles')+'</h4><div class="row"><span>'+T('Profile')+'</span><select id="dd-profile"></select><span></span></div><div class="actions act-grid-2"><button id="pf-save-as" class="ghost">'+T('Save')+'</button><button id="pf-delete" class="ghost">'+T('Delete')+'</button></div><div class="actions act-grid-2"><button id="pf-rename" class="ghost">'+T('Rename')+'</button><button id="pf-duplicate" class="ghost">'+T('Duplicate')+'</button></div><div class="actions act-grid-2"><button id="pf-bind" class="ghost">'+T('Bind to this story')+'</button><button id="pf-unbind" class="ghost">'+T('Unbind')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Export / Import')+'</h4><div class="actions act-grid-2"><button id="btn-export" class="ghost">'+T('Export')+'</button><button id="btn-export-active" class="ghost">'+T('Export active profile')+'</button><button id="btn-import-merge" class="ghost">'+T('Import (Merge)')+'</button><button id="btn-import-replace" class="ghost">'+T('Import (Replace)')+'</button><input id="file-import" type="file" accept="application/json" style="display:none"/></div></div>'+ 
+        '<div class="actions"><button id="reset-all" class="ghost">'+T('Reset All')+'</button></div>'+
+      '</section>';
+    // Rebuild Format section using safe DOM construction
+    try{
+      const oldFormat = sectionsEl.querySelector('#aidt-section-format');
+      if (oldFormat){
+        const sec = document.createElement('section');
+        sec.id = 'aidt-section-format'; sec.className='section';
+        sec.setAttribute('data-section','format'); sec.setAttribute('role','tabpanel'); sec.setAttribute('aria-labelledby','aidt-tab-format');
 
-      // ACTIONS
-      '<section class="section active" data-section="actions">' +
+        const buildSwitchGroup = (labelPrefix, ids)=>{
+          const grp = document.createElement('div'); grp.className='group';
+          const h4=document.createElement('h4'); h4.textContent=T(labelPrefix); grp.appendChild(h4);
+          // Row 1
+          const r1=document.createElement('div'); r1.className='row';
+          const sp1=document.createElement('span'); sp1.textContent=T('Bold'); r1.appendChild(sp1);
+          const sw=document.createElement('div'); sw.id=ids.swBold; sw.className='switch'; sw.innerHTML='<div class="knob"></div>';
+          r1.appendChild(sw); r1.appendChild(document.createElement('span')); grp.appendChild(r1);
+          // Row 2
+          const r2=document.createElement('div'); r2.className='row';
+          const sp2=document.createElement('span'); sp2.textContent=T('Colour'); r2.appendChild(sp2);
+          const dd=document.createElement('select'); dd.id=ids.ddPresets; dd.className='presets'; r2.appendChild(dd); grp.appendChild(r2);
+          // Row 3
+          const r3=document.createElement('div'); r3.className='row'; r3.appendChild(document.createElement('span'));
+          const inp=document.createElement('input'); inp.id=ids.inputColour; inp.type='color'; r3.appendChild(inp);
+          const rst=document.createElement('button'); rst.id=ids.btnResetColour; rst.className='reset'; rst.title=T('Reset'); rst.textContent='↺'; r3.appendChild(rst); grp.appendChild(r3);
+          // Actions
+          const acts=document.createElement('div'); acts.className='actions'; const btn=document.createElement('button'); btn.id=ids.btnRestore; btn.className='ghost'; btn.textContent=T('Restore Defaults'); acts.appendChild(btn); grp.appendChild(acts);
+          return grp;
+        };
 
-        '<div class="group"><h4>'+T('Do')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-do-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-do-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-do-colour" type="color" value="#ffffff"/><button id="rst-do-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        // Main Text, Speech, Internal Monologue, Italics
+        sec.appendChild(buildSwitchGroup('Main Text', { swBold:'sw-main-bold', ddPresets:'dd-main-presets', inputColour:'sel-main-colour', btnResetColour:'rst-main-colour', btnRestore:'rst-main-group' }));
+        sec.appendChild(buildSwitchGroup('Speech',    { swBold:'sw-sp-bold',   ddPresets:'dd-sp-presets',   inputColour:'sel-sp-colour',  btnResetColour:'rst-sp-colour',  btnRestore:'rst-sp-group' }));
+        sec.appendChild(buildSwitchGroup('Internal Monologue', { swBold:'sw-im-bold', ddPresets:'dd-im-presets', inputColour:'sel-im-colour', btnResetColour:'rst-im-colour', btnRestore:'rst-im-group' }));
+        sec.appendChild(buildSwitchGroup('Italics',   { swBold:'sw-it-bold',   ddPresets:'dd-it-presets',   inputColour:'sel-it-colour',  btnResetColour:'rst-it-colour',  btnRestore:'rst-it-group' }));
 
-        '<div class="group"><h4>'+T('Say')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-say-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-say-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-say-colour" type="color" value="#ffffff"/><button id="rst-say-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        // Keywords group
+        const kw=document.createElement('div'); kw.className='group';
+        let h=document.createElement('h4'); h.textContent=T('Keywords'); kw.appendChild(h);
+        const rkw=document.createElement('div'); rkw.className='row';
+        const spkw=document.createElement('span'); spkw.textContent=T('Add Keyword'); rkw.appendChild(spkw);
+        const inkw=document.createElement('input'); inkw.id='tf-keyword-input'; inkw.type='text'; inkw.placeholder='Type a keyword or phrase…'; rkw.appendChild(inkw);
+        const bkw=document.createElement('button'); bkw.id='tf-keyword-add'; bkw.className='reset'; bkw.title=T('Add'); bkw.textContent='＋'; rkw.appendChild(bkw);
+        kw.appendChild(rkw);
+        const chips=document.createElement('div'); chips.id='tf-keyword-chips'; chips.className='chips'; kw.appendChild(chips);
+        const actsKw=document.createElement('div'); actsKw.className='actions'; const br=document.createElement('button'); br.id='rst-kw-group'; br.className='ghost'; br.textContent=T('Restore Defaults'); actsKw.appendChild(br); kw.appendChild(actsKw);
+        sec.appendChild(kw);
 
-        '' +
-      '</section>' +
+        // All Caps Effects group
+        const caps=document.createElement('div'); caps.className='group'; h=document.createElement('h4'); h.textContent=T('All Caps Effects'); caps.appendChild(h);
+        const rce1=document.createElement('div'); rce1.className='row'; let sp=document.createElement('span'); sp.textContent=T('Effect'); rce1.appendChild(sp);
+        const ddEff=document.createElement('select'); ddEff.id='dd-effects'; ['None','Flash','Strobe','Rainbow','Wave','Breathe'].forEach(v=>{ const o=document.createElement('option'); o.textContent=v; ddEff.appendChild(o); }); rce1.appendChild(ddEff); rce1.appendChild(document.createElement('span')); caps.appendChild(rce1);
+        const rce2=document.createElement('div'); rce2.className='row'; sp=document.createElement('span'); sp.textContent=T('Exclusions'); rce2.appendChild(sp);
+        const ex=document.createElement('input'); ex.id='tf-caps-ex-input'; ex.type='text'; ex.placeholder='HQ, CEO, NASA…'; rce2.appendChild(ex);
+        const addEx=document.createElement('button'); addEx.id='tf-caps-ex-add'; addEx.className='reset'; addEx.title=T('Add'); addEx.textContent='＋'; rce2.appendChild(addEx); caps.appendChild(rce2);
+        const chipsEx=document.createElement('div'); chipsEx.id='tf-caps-ex-chips'; chipsEx.className='chips'; caps.appendChild(chipsEx);
+        const actsCaps=document.createElement('div'); actsCaps.className='actions'; const brc=document.createElement('button'); brc.id='rst-caps-group'; brc.className='ghost'; brc.textContent=T('Restore Defaults'); actsCaps.appendChild(brc); caps.appendChild(actsCaps);
+        sec.appendChild(caps);
 
-      // TEXT FORMATTING
-      '<section class="section" data-section="format">' +
-        // Main Text first
-        '<div class="group"><h4>'+T('Main Text')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-main-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-main-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-main-colour" type="color" value="#ffffff"/><button id="rst-main-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        // Font group
+        const fg=document.createElement('div'); fg.className='group'; h=document.createElement('h4'); h.textContent=T('Font'); fg.appendChild(h);
+        const mkRow=(label, node)=>{ const r=document.createElement('div'); r.className='row'; const s=document.createElement('span'); s.textContent=label; r.appendChild(s); r.appendChild(node); const pad=document.createElement('button'); pad.id=''; pad.style.display='none'; r.appendChild(document.createElement('button')); return r; };
+        const rFam=document.createElement('div'); rFam.className='row'; let sFam=document.createElement('span'); sFam.textContent=T('Font Family'); rFam.appendChild(sFam);
+        const ddFam=document.createElement('select'); ddFam.id='dd-font-family'; ['inherit','system-sans','system-mono','Georgia','Times New Roman','Inter','Roboto','Open Sans','Nunito','Merriweather','Lora','JetBrains Mono','Fira Code','Source Code Pro','Courier New','custom'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=(v==='inherit'?'Default (inherit)': (v==='system-sans'?'System Sans': v==='system-mono'?'Monospace (System)': v==='custom'?'Custom (Google Fonts URL)': v)); ddFam.appendChild(o); }); rFam.appendChild(ddFam);
+        const rstFam=document.createElement('button'); rstFam.id='rst-font-family'; rstFam.className='reset'; rstFam.title=T('Reset'); rstFam.textContent='↺'; rFam.appendChild(rstFam); fg.appendChild(rFam);
+        const rUrl=document.createElement('div'); rUrl.className='row'; rUrl.id='row-font-url'; rUrl.style.display='none'; const sUrl=document.createElement('span'); sUrl.textContent=T('Custom Google Fonts URL'); rUrl.appendChild(sUrl); const tf=document.createElement('input'); tf.id='tf-font-url'; tf.type='text'; tf.placeholder='https://fonts.googleapis.com/css2?family=...&display=swap'; rUrl.appendChild(tf); const ap=document.createElement('button'); ap.id='btn-font-apply'; ap.className='ghost'; ap.title=T('Apply'); ap.textContent=T('Apply'); rUrl.appendChild(ap); fg.appendChild(rUrl);
+        const rSize=document.createElement('div'); rSize.className='row'; const sSize=document.createElement('span'); sSize.textContent=T('Font Size'); rSize.appendChild(sSize); const rngSize=document.createElement('input'); rngSize.id='rng-font-size'; rngSize.type='range'; rngSize.min='80'; rngSize.max='160'; rngSize.step='1'; rSize.appendChild(rngSize); const rstSize=document.createElement('button'); rstSize.id='rst-font-size'; rstSize.className='reset'; rstSize.title=T('Reset'); rstSize.textContent='↺'; rSize.appendChild(rstSize); fg.appendChild(rSize);
+        const rWeight=document.createElement('div'); rWeight.className='row'; const sWeight=document.createElement('span'); sWeight.textContent=T('Font Weight'); rWeight.appendChild(sWeight); const ddW=document.createElement('select'); ddW.id='dd-font-weight'; [['default','Default'],['regular','Regular (400)'],['medium','Medium (500)'],['bold','Bold (700)']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ddW.appendChild(o); }); rWeight.appendChild(ddW); const rstW=document.createElement('button'); rstW.id='rst-font-weight'; rstW.className='reset'; rstW.title=T('Reset'); rstW.textContent='↺'; rWeight.appendChild(rstW); fg.appendChild(rWeight);
+        const rLH=document.createElement('div'); rLH.className='row'; const sLH=document.createElement('span'); sLH.textContent=T('Line Height'); rLH.appendChild(sLH); const rngLH=document.createElement('input'); rngLH.id='rng-line-height'; rngLH.type='range'; rngLH.min='1.1'; rngLH.max='2.0'; rngLH.step='0.05'; rLH.appendChild(rngLH); const rstLH=document.createElement('button'); rstLH.id='rst-line-height'; rstLH.className='reset'; rstLH.title=T('Reset'); rstLH.textContent='↺'; rLH.appendChild(rstLH); fg.appendChild(rLH);
+        const rLS=document.createElement('div'); rLS.className='row'; const sLS=document.createElement('span'); sLS.textContent=T('Letter Spacing'); rLS.appendChild(sLS); const rngLS=document.createElement('input'); rngLS.id='rng-letter-spacing'; rngLS.type='range'; rngLS.min='-0.05'; rngLS.max='0.2'; rngLS.step='0.005'; rLS.appendChild(rngLS); const rstLS=document.createElement('button'); rstLS.id='rst-letter-spacing'; rstLS.className='reset'; rstLS.title=T('Reset'); rstLS.textContent='↺'; rLS.appendChild(rstLS); fg.appendChild(rLS);
+        const rTA=document.createElement('div'); rTA.className='row'; const sTA=document.createElement('span'); sTA.textContent=T('Text Alignment'); rTA.appendChild(sTA); const ddTA=document.createElement('select'); ddTA.id='dd-text-align'; [['default','Default'],['left','Left'],['justify','Justify']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ddTA.appendChild(o); }); rTA.appendChild(ddTA); const rstTA=document.createElement('button'); rstTA.id='rst-text-align'; rstTA.className='reset'; rstTA.title=T('Reset'); rstTA.textContent='↺'; rTA.appendChild(rstTA); fg.appendChild(rTA);
+        const rPar=document.createElement('div'); rPar.className='row'; const sPar=document.createElement('span'); sPar.textContent=T('Paragraphs'); rPar.appendChild(sPar); const ddPar=document.createElement('select'); ddPar.id='dd-paragraphs'; [['default','Default'],['basic','Basic'],['newline','New Line']].forEach(([v,l])=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; ddPar.appendChild(o); }); rPar.appendChild(ddPar); const rstPar=document.createElement('button'); rstPar.id='rst-paragraphs'; rstPar.className='reset'; rstPar.title=T('Reset'); rstPar.textContent='↺'; rPar.appendChild(rstPar); fg.appendChild(rPar);
+        const actsFont=document.createElement('div'); actsFont.className='actions'; const btnFont=document.createElement('button'); btnFont.id='rst-font-block'; btnFont.className='ghost'; btnFont.textContent=T('Reset Font'); actsFont.appendChild(btnFont); fg.appendChild(actsFont);
+        sec.appendChild(fg);
 
-        // Speech
-        '<div class="group"><h4>'+T('Speech')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-sp-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-sp-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-sp-colour" type="color"/><button id="rst-sp-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        const actsAll=document.createElement('div'); actsAll.className='actions'; const btnAll=document.createElement('button'); btnAll.id='rst-formatting'; btnAll.className='ghost'; btnAll.textContent='Reset Text Formatting'; actsAll.appendChild(btnAll); sec.appendChild(actsAll);
 
-        // Internal Monologue
-        '<div class="group"><h4>'+T('Internal Monologue')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-im-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-im-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-im-colour" type="color"/><button id="rst-im-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        oldFormat.replaceWith(sec);
+      }
+    }catch(_){ }
+    // Rebuild Actions section using safe DOM construction
+    try{
+      const oldActions = sectionsEl.querySelector('#aidt-section-actions');
+      if (oldActions){
+        const sec = document.createElement('section');
+        sec.id = 'aidt-section-actions';
+        sec.className = 'section';
+        sec.setAttribute('data-section','actions');
+        sec.setAttribute('role','tabpanel');
+        sec.setAttribute('aria-labelledby','aidt-tab-actions');
 
-        // Italics (unquoted)
-        '<div class="group"><h4>'+T('Italics')+'</h4>' +
-          '<div class="row"><span>'+T('Bold')+'</span><div id="sw-it-bold" class="switch"><div class="knob"></div></div><span></span></div>' +
-          '<div class="row"><span>'+T('Colour')+'</span><select id="dd-it-presets" class="presets"></select></div>' +
-          '<div class="row"><span></span><input id="sel-it-colour" type="color"/><button id="rst-it-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-        '</div>' +
+        const buildGroup = (labelPrefix, ids)=>{
+          const grp = document.createElement('div'); grp.className='group';
+          const h4 = document.createElement('h4'); h4.textContent = T(labelPrefix); grp.appendChild(h4);
+          // Row 1: Bold + switch
+          const r1 = document.createElement('div'); r1.className='row';
+          const r1s = document.createElement('span'); r1s.textContent=T('Bold'); r1.appendChild(r1s);
+          const sw = document.createElement('div'); sw.id=ids.swBold; sw.className='switch'; sw.innerHTML='<div class="knob"></div>';
+          r1.appendChild(sw);
+          r1.appendChild(document.createElement('span'));
+          grp.appendChild(r1);
+          // Row 2: Colour + select
+          const r2 = document.createElement('div'); r2.className='row';
+          const r2s = document.createElement('span'); r2s.textContent=T('Colour'); r2.appendChild(r2s);
+          const sel = document.createElement('select'); sel.id=ids.ddPresets; sel.className='presets'; r2.appendChild(sel);
+          grp.appendChild(r2);
+          // Row 3: color input + reset
+          const r3 = document.createElement('div'); r3.className='row';
+          r3.appendChild(document.createElement('span'));
+          const inp = document.createElement('input'); inp.id=ids.inputColour; inp.type='color'; inp.value='#ffffff'; r3.appendChild(inp);
+          const rst = document.createElement('button'); rst.id=ids.btnResetColour; rst.className='reset'; rst.title=T('Reset'); rst.textContent='↺'; r3.appendChild(rst);
+          grp.appendChild(r3);
+          // Actions: Restore Defaults
+          const acts = document.createElement('div'); acts.className='actions';
+          const btn = document.createElement('button'); btn.id=ids.btnRestore; btn.className='ghost'; btn.textContent=T('Restore Defaults'); acts.appendChild(btn);
+          grp.appendChild(acts);
+          return grp;
+        };
 
-        // Keywords
-        '<div class="group"><h4>'+T('Keywords')+'</h4>' +
-          '<div class="row"><span>'+T('Add Keyword')+'</span><input id="tf-keyword-input" type="text" placeholder="Type a keyword or phrase…"/><button id="tf-keyword-add" class="reset" title="'+T('Add')+'">＋</button></div>' +
-          '<div id="tf-keyword-chips" class="chips"></div>' +
-        '</div>' +
+        // Do group
+        sec.appendChild(buildGroup('Do', {
+          swBold:'sw-do-bold', ddPresets:'dd-do-presets', inputColour:'sel-do-colour', btnResetColour:'rst-do-colour', btnRestore:'rst-do-group'
+        }));
+        // Say group
+        sec.appendChild(buildGroup('Say', {
+          swBold:'sw-say-bold', ddPresets:'dd-say-presets', inputColour:'sel-say-colour', btnResetColour:'rst-say-colour', btnRestore:'rst-say-group'
+        }));
 
-        // All Caps Effects
-        '<div class="group"><h4>'+T('All Caps Effects')+'</h4>' +
-          '<div class="row"><span>'+T('Effect')+'</span><select id="dd-effects"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option></select><span></span></div>' +
-          '<div class="row"><span>'+T('Exclusions')+'</span><input id="tf-caps-ex-input" type="text" placeholder="HQ, CEO, NASA…"/><button id="tf-caps-ex-add" class="reset" title="'+T('Add')+'">＋</button></div>' +
-          '<div id="tf-caps-ex-chips" class="chips"></div>' +
-        '</div>' +
-
-        // Font block
-        '<div class="group"><h4>'+T('Font')+'</h4>' +
-          '<div class="row"><span>'+T('Font Family')+'</span>' +
-            '<select id="dd-font-family">' +
-              '<option value="inherit">Default (inherit)</option>' +
-              '<option value="system-sans">System Sans</option>' +
-              '<option value="system-mono">Monospace (System)</option>' +
-              '<option value="Georgia">Georgia</option>' +
-              '<option value="Times New Roman">Times New Roman</option>' +
-              '<option value="Inter">Inter</option>' +
-              '<option value="Roboto">Roboto</option>' +
-              '<option value="Open Sans">Open Sans</option>' +
-              '<option value="Nunito">Nunito</option>' +
-              '<option value="Merriweather">Merriweather</option>' +
-              '<option value="Lora">Lora</option>' +
-              '<option value="JetBrains Mono">JetBrains Mono</option>' +
-              '<option value="Fira Code">Fira Code</option>' +
-              '<option value="Source Code Pro">Source Code Pro</option>' +
-              '<option value="Courier New">Courier New</option>' +
-            '</select><button id="rst-font-family" class="reset" title="Reset">↺</button>' +
-          '</div>' +
-          '<div class="row"><span>'+T('Font Size')+'</span><input id="rng-font-size" type="range" min="80" max="160" step="1"/><button id="rst-font-size" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Font Weight')+'</span><select id="dd-font-weight"><option value="default">Default</option><option value="regular">Regular (400)</option><option value="medium">Medium (500)</option><option value="bold">Bold (700)</option></select><button id="rst-font-weight" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Line Height')+'</span><input id="rng-line-height" type="range" min="1.1" max="2.0" step="0.05"/><button id="rst-line-height" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Letter Spacing')+'</span><input id="rng-letter-spacing" type="range" min="-0.05" max="0.2" step="0.005"/><button id="rst-letter-spacing" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Text Alignment')+'</span><select id="dd-text-align"><option value="default">Default</option><option value="left">Left</option><option value="justify">Justify</option></select><button id="rst-text-align" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Paragraphs')+'</span><select id="dd-paragraphs"><option value="default">Default</option><option value="basic">Basic</option><option value="newline">New Line</option></select><button id="rst-paragraphs" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="actions"><button id="rst-font-block" class="ghost">'+T('Reset Font')+'</button></div>' +
-        '</div>' +
-
-        '<div class="actions"><button id="rst-formatting" class="ghost">Reset Text Formatting</button></div>' +
-      '</section>' +
-
-      // MISC
-      '<section class="section" data-section="misc">' +
-        '<div class="group"><h4>'+T('Background')+'</h4>' +
-          '<div class="row"><span>'+T('Background type')+'</span><select id="dd-bg-type"><option value="default">'+T('Default')+'</option><option value="backdrop">'+T('Backdrop (behind overlays)')+'</option><option value="solid">'+T('Solid (override overlays)')+'</option><option value="image">'+T('Custom image URL')+'</option></select><button id="rst-bg-type" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Background colour')+'</span><input id="sel-bg-colour" type="color"/><button id="rst-bg-colour" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row"><span>'+T('Backdrop opacity')+'</span><input id="rng-bg-opacity" type="range" min="0" max="100" step="1"/><button id="rst-bg-opacity" class="reset" title="'+T('Reset')+'">↺</button></div>' +
-          '<div class="row" id="row-bg-image" style="display:none"><span>Image URL</span><input id="tf-bg-image" type="text" placeholder="https://..."/><span></span></div>' +
-        '</div>' +
-
-        '<div class="group"><h4>'+T('AI Model')+'</h4>' +
-          '<div class="row"><span>'+T('Model')+'</span><select id="dd-ai-model"></select><button id="btn-ai-refresh" class="reset" title="'+T('Refresh')+'">⟳</button></div>' +
-        '</div>' +
-
-        '<div class="group"><h4>'+T('Language')+'</h4>' +
-          '<div class="row"><span>'+T('Language override')+'</span><select id="dd-lang"><option value="default">'+T('Default')+'</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="es">Español</option><option value="it">Italiano</option><option value="pt-BR">Português (Brasil)</option><option value="pt">Português</option><option value="tr">Türkçe</option><option value="pl">Polski</option><option value="ru">Русский</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh-CN">简体中文</option><option value="zh">中文</option><option value="ar">العربية</option><option value="hi">हिन्दी</option><option value="id">Bahasa Indonesia</option></select><span></span></div>' +
-        '</div>' +
-
-        '<div class="group"><h4>'+T('Profiles')+'</h4>' +
-          '<div class="row"><span>'+T('Profile')+'</span><select id="dd-profile"></select><span class="subtle nowrap">Active</span></div>' +
-          '<div class="actions"><button id="pf-save-as" class="ghost">'+T('Save as new')+'</button><button id="pf-rename" class="ghost">'+T('Rename')+'</button><button id="pf-duplicate" class="ghost">'+T('Duplicate')+'</button><button id="pf-delete" class="ghost">'+T('Delete')+'</button></div>' +
-          '<div class="actions"><button id="pf-bind" class="ghost">'+T('Bind to this story')+'</button><button id="pf-unbind" class="ghost">'+T('Unbind')+'</button></div>' +
-        '</div>' +
-
-        '<div class="group"><h4>Export / Import</h4>' +
-          '<div class="actions"><button id="btn-export" class="ghost">'+T('Export')+'</button><button id="btn-import" class="ghost">'+T('Import')+'</button><input id="file-import" type="file" accept="application/json" style="display:none"/></div>' +
-        '</div>' +
-        '<div class="actions"><button id="reset-all" class="ghost">'+T('Reset All')+'</button></div>' +
-      '</section>' +
-      '</div>';
+        oldActions.replaceWith(sec);
+      }
+    }catch(_){ }
+    panel.appendChild(sectionsEl);
     root.appendChild(panel);
+
+    // A11y: dialog semantics, focus management
+    try{
+      panel.setAttribute('role','dialog');
+      panel.setAttribute('aria-modal','true');
+      const titleNode = panel.querySelector('.title');
+      if (titleNode){ titleNode.id = 'aidt-title'; panel.setAttribute('aria-labelledby','aidt-title'); }
+      panel.setAttribute('aria-describedby','aidt-desc');
+    }catch(_){ }
+
+    let __aidt_prevFocus = null;
+    function __aidt_focusables(){
+      try{ return Array.prototype.slice.call(panel.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')); }catch(_){ return []; }
+    }
+    function __aidt_announce(msg){ try{ const n=panel.querySelector('#aidt-live'); if(n){ n.textContent=''; setTimeout(()=>{ try{ n.textContent=msg; }catch(_){ } }, 0);} }catch(_){ } }
+    function openPanel(){ try{ if (panel.classList.contains('open')) return; panel.classList.add('open'); try{ const last=(safeGet('aidt:lastTab')||'') || (settings && settings.uiLastTab) || ''; if (last){ const tabs=panel.querySelectorAll('.tab'); const sections=panel.querySelectorAll('.section'); sections.forEach(sec=>sec.classList.toggle('active', sec.getAttribute('data-section')===last)); tabs.forEach(t=>t.setAttribute('aria-selected', String(t.getAttribute('data-tab')===last))); setTimeout(()=>{ try{ sections.forEach(sec=>sec.classList.toggle('active', sec.getAttribute('data-section')===last)); tabs.forEach(t=>t.setAttribute('aria-selected', String(t.getAttribute('data-tab')===last))); }catch(__){} }, 50); } }catch(__){} __aidt_prevFocus = (document.activeElement||null); setTimeout(()=>{ try{ (panel.querySelector('#close') || __aidt_focusables()[0]).focus(); }catch(__){} }, 0); __aidt_announce('Dialog opened. Press Escape to close.'); }catch(_){} }
+    function closePanel(){ try{ if (!panel.classList.contains('open')) return; panel.classList.remove('open'); __aidt_announce('Dialog closed.'); setTimeout(()=>{ try{ __aidt_prevFocus && __aidt_prevFocus.focus && __aidt_prevFocus.focus(); }catch(__){} }, 0); }catch(_){} }
+    function togglePanel(){ try{ if (panel.classList.contains('open')) closePanel(); else openPanel(); }catch(_){} }
+    try{
+      root.addEventListener('keydown', function(e){
+        try{
+          if (!panel.classList.contains('open')) return;
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePanel(); return; }
+          if (e.key === 'Tab'){
+            const f = __aidt_focusables(); if (!f.length) return;
+            const first=f[0], last=f[f.length-1];
+            const active = panel.shadowRoot ? panel.shadowRoot.activeElement : document.activeElement;
+            if (e.shiftKey){ if (active === first){ e.preventDefault(); last.focus(); } }
+            else { if (active === last){ e.preventDefault(); first.focus(); } }
+          }
+        }catch(__){}
+      }, true);
+    }catch(_){ }
 
     // Try to mount a second AIDT button in the site navbar (next to #game-blur-button)
     (function(){
@@ -2290,7 +2820,7 @@
               const now = Date.now();
               if (now - _lastToggleTs < 250) return; // debounce to avoid double toggles from multiple events
               _lastToggleTs = now;
-              panel.classList.toggle('open');
+              togglePanel();
             }catch(_e){}
           }
           const ua=(navigator.userAgent||'').toLowerCase();
@@ -2302,11 +2832,11 @@
             try{ navBtn.style.position='relative'; navBtn.style.zIndex='2147483647'; navBtn.style.pointerEvents='auto'; }catch(_){ }
             if (isPlay){
               // On play.aidungeon Chrome, some parents use pointer-events:none; bind both pointerdown and click in capture phase
-              try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+              try{ navBtn.addEventListener('pointerdown', _toggle, {capture:true, passive:true}); }catch(_){ }
               try{ navBtn.addEventListener('click', _toggle, true); }catch(_){ }
             } else {
               // beta: pointerdown capture suffices
-              try{ navBtn.addEventListener('pointerdown', _toggle, true); }catch(_){ }
+              try{ navBtn.addEventListener('pointerdown', _toggle, {capture:true, passive:true}); }catch(_){ }
             }
           } else {
             navBtn.addEventListener('click', _toggle, false);
@@ -2325,13 +2855,16 @@
       setTimeout(mountNavBtn, 2000);
       // Also watch for SPA nav changes
       try{
-        const mo = new MutationObserver(()=>mountNavBtn());
-        mo.observe(document.body, {childList:true, subtree:true});
+        if (!window.__AIDT_NAV_OBSERVER__){
+          const mo = createAidtObserver(()=>mountNavBtn());
+          mo.observe(document.body, {childList:true, subtree:true});
+          window.__AIDT_NAV_OBSERVER__ = mo;
+          try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
+        }
       }catch(_){ }
     })();
-
     const $ = sel=>panel.querySelector(sel);
-    const setSwitch=(el,on)=>{ if(el){ el.setAttribute('data-on', on?'true':'false'); el.setAttribute('title', on?T('Disable'):T('Enable')); } };
+    const setSwitch=(el,on)=>{ if(el){ el.setAttribute('data-on', on?'true':'false'); el.setAttribute('role','switch'); el.setAttribute('aria-checked', on?'true':'false'); el.setAttribute('tabindex','0'); el.setAttribute('title', on?T('Disable'):T('Enable')); } };
     const getSwitch= el=>!!(el && el.getAttribute('data-on')==='true');
 
     // --- Keywords UI
@@ -2340,34 +2873,58 @@
       wrap.innerHTML='';
       const list=(settings.textFormatting.keywords||[]).map(k=>{
         if (typeof k==='string') return { text:k, effect:'None', bold:false };
-        return { text:(k.text||''), effect:(k.effect||'None'), bold:!!k.bold };
+        return { text:(k.text||''), effect:(k.effect||'None'), bold:!!k.bold, color:k.color };
       });
       settings.textFormatting.keywords=list;
+      const frag=document.createDocumentFragment();
       list.forEach((kw,idx)=>{
-        const chip=document.createElement('span'); chip.className='chip';
-        const selId='kw-eff-'+idx; const swId='kw-bold-'+idx; const colId='kw-col-'+idx; const delId='kw-del-'+idx;
-        chip.innerHTML=
-          '<span>'+kw.text+'</span>'+
-          ' <select id="'+selId+'"><option>None</option><option>Flash</option><option>Strobe</option><option>Rainbow</option><option>Wave</option><option>Breathe</option><option value="__custom__">Custom Color…</option></select>'+
-          ' <input id="'+colId+'" type="color" style="display:none; vertical-align:middle; width:22px; height:22px; padding:0; border:none; background:transparent" />'+
-          ' <span class="switch" id="'+swId+'"><div class="knob"></div></span>'+
-          ' <button id="'+delId+'">×</button>';
-        wrap.appendChild(chip);
-        const sel=chip.querySelector('#'+selId); if(sel){ sel.value=kw.effect||'None'; sel.addEventListener('change',()=>{ if (sel.value==='__custom__'){ const prev=kw.effect||'None'; sel.value=prev; const ci=chip.querySelector('#'+colId); if(ci){ ci.style.display='inline-block'; ci.focus(); ci.click(); } return; } kw.effect=sel.value||'None'; persistSettings(); applyGlobal(); reparseNow(); }); }
-        const col=chip.querySelector('#'+colId); if(col){ col.value = (kw.color||'#ffffff'); col.addEventListener('input', ()=>{ kw.color=col.value; persistSettings(); applyGlobal(); reparseNow(); }); col.addEventListener('change', ()=>{ kw.color=col.value; persistSettings(); applyGlobal(); reparseNow(); }); }
-        const sw=chip.querySelector('#'+swId); if(sw){ setSwitch(sw, !!kw.bold); sw.addEventListener('click',()=>{ kw.bold=!kw.bold; setSwitch(sw, !!kw.bold); persistSettings(); applyGlobal(); reparseNow(); }); }
-        const del=chip.querySelector('#'+delId); if(del){ del.addEventListener('click',()=>{ settings.textFormatting.keywords.splice(idx,1); persistSettings(); renderKeywordChips(); applyGlobal(); reparseNow(); }); }
+        const chip=document.createElement('span'); chip.className='chip'; chip.setAttribute('data-idx', String(idx));
+        const textSpan=document.createElement('span'); textSpan.textContent=kw.text;
+        const select=document.createElement('select'); select.setAttribute('data-role','effect');
+        ;['None','Flash','Strobe','Rainbow','Wave','Breathe'].forEach(v=>{ const o=document.createElement('option'); o.textContent=v; o.value=v; select.appendChild(o); });
+        const optCustom=document.createElement('option'); optCustom.value='__custom__'; optCustom.textContent='Custom Color…'; select.appendChild(optCustom); select.value=kw.effect||'None';
+        const color=document.createElement('input'); color.type='color'; color.setAttribute('data-role','color'); color.value = (kw.color||'#ffffff'); color.style.display='none'; color.style.verticalAlign='middle'; color.style.width='22px'; color.style.height='22px'; color.style.padding='0'; color.style.border='none'; color.style.background='transparent';
+        const lbl=document.createElement('span'); lbl.className='lbl'; lbl.appendChild(document.createTextNode('Bold '));
+        const sw=document.createElement('span'); sw.className='switch'; sw.setAttribute('data-role','bold'); const knob=document.createElement('div'); knob.className='knob'; sw.appendChild(knob); setSwitch(sw, !!kw.bold);
+        const del=document.createElement('button'); del.textContent='×'; del.setAttribute('data-role','del'); del.title=T('Delete'); del.setAttribute('aria-label', T('Delete'));
+        chip.appendChild(textSpan); chip.appendChild(document.createTextNode(' ')); chip.appendChild(select); chip.appendChild(document.createTextNode(' ')); chip.appendChild(color); chip.appendChild(document.createTextNode(' ')); chip.appendChild(lbl); lbl.appendChild(sw); chip.appendChild(document.createTextNode(' ')); chip.appendChild(del);
+        frag.appendChild(chip);
       });
+      wrap.appendChild(frag);
+      if (!wrap.__aidtDelegated){
+        wrap.__aidtDelegated = true;
+        wrap.addEventListener('click', (ev)=>{
+          try{
+            const t=ev.target;
+            const chip=t && t.closest ? t.closest('.chip') : null; if(!chip) return;
+            const idx=parseInt(chip.getAttribute('data-idx')||'-1',10); if(isNaN(idx)) return;
+            const roleDel = t.closest && t.closest('button[data-role="del"]');
+            const roleBold = t.closest && t.closest('.switch[data-role="bold"]');
+            if (roleDel){ settings.textFormatting.keywords.splice(idx,1); persistSettings(); renderKeywordChips(); applyGlobal(); reparseNow(); return; }
+            if (roleBold){ const kw=settings.textFormatting.keywords[idx]; if(!kw) return; kw.bold=!kw.bold; setSwitch(roleBold, !!kw.bold); persistSettings(); applyGlobal(); reparseNow(); return; }
+          }catch(_){ }
+        });
+        wrap.addEventListener('change', (ev)=>{
+          try{
+            const t=ev.target; const chip=t && t.closest ? t.closest('.chip') : null; if(!chip) return; const idx=parseInt(chip.getAttribute('data-idx')||'-1',10); if(isNaN(idx)) return; const kw=settings.textFormatting.keywords[idx]; if(!kw) return;
+            if (t.matches && t.matches('select[data-role="effect"]')){ const sel=t; if (sel.value==='__custom__'){ const col=chip.querySelector('input[data-role="color"]'); if(col){ col.style.display='inline-block'; col.focus(); col.click(); } return; } kw.effect=sel.value||'None'; persistSettings(); applyGlobal(); reparseNow(); }
+            if (t.matches && t.matches('input[type="color"][data-role="color"]')){ kw.color=t.value; persistSettings(); applyGlobal(); reparseNow(); }
+          }catch(_){ }
+        });
+        wrap.addEventListener('input', (ev)=>{
+          try{ const t=ev.target; if(!(t && t.matches && t.matches('input[type="color"][data-role="color"]'))) return; const chip=t.closest('.chip'); if(!chip) return; const idx=parseInt(chip.getAttribute('data-idx')||'-1',10); if(isNaN(idx)) return; const kw=settings.textFormatting.keywords[idx]; if(!kw) return; kw.color=t.value; persistSettingsDebounced(); applyGlobal(); reparseNow(); }catch(_){ }
+        });
+      }
     };
 
     const rebuildProfileDropdown=()=>{
       const dd=$('#dd-profile'); dd.innerHTML='';
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
+      const meta=(profiles && profiles._meta && profiles._meta.lastModifiedAt) || {};
       Object.keys(profiles.profiles).sort().forEach(name=>{
-        const o=document.createElement('option'); o.value=name; o.textContent=name; dd.appendChild(o);
+        const o=document.createElement('option'); o.value=name; const when=meta[name]; o.textContent= when ? (name+' — '+new Date(when).toLocaleString()) : name; dd.appendChild(o);
       });
     };
-
     // --- AI Model discovery and application ---
     const normalizeModelName = (s)=>{ try{ return String(s||'').trim().replace(/\s+/g,' '); }catch(_){ return ''; } };
     const discoverAiModels = ()=>{
@@ -2464,6 +3021,8 @@
         const colorRow   = ($('#sel-bg-colour') && $('#sel-bg-colour').closest) ? $('#sel-bg-colour').closest('.row') : null;
         const opacityRow = ($('#rng-bg-opacity') && $('#rng-bg-opacity').closest) ? $('#rng-bg-opacity').closest('.row') : null;
         const imageRow   = $('#row-bg-image') || null;
+        const imageOpts  = $('#row-bg-image-opts') || null;
+        const gradRow    = $('#row-bg-gradient') || null;
 
         // Default: hide color, hide opacity, hide image URL
         // Backdrop: show color, show+enable opacity, hide image URL
@@ -2475,18 +3034,31 @@
           opacityRow.style.display = showOpacity ? '' : 'none';
           if (showOpacity){ opacityRow.classList.remove('is-disabled'); } else { opacityRow.classList.add('is-disabled'); }
         }
+        if (gradRow){ gradRow.style.display = (type==='gradient') ? '' : 'none'; }
         if (imageRow){ imageRow.style.display = (type==='image') ? '' : 'none'; }
+        if (imageOpts){ imageOpts.style.display = (type==='image') ? '' : 'none'; }
       }catch(_){ }
     }
-
     const refreshUI=()=>{
       setSwitch($('#sw-enabled'), !!settings.enabled);
       setSwitch($('#sw-do-bold'), !!settings.actions.do.bold);
       $('#sel-do-colour').value = settings.actions.do.colour || '#ffffff';
-      const ddDo=$('#dd-do-presets'); if (ddDo){ ddDo.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddDo.value = settings.actions.do.colour || '#ffffff'; }
+      const ddDo=$('#dd-do-presets'); if (ddDo){
+        while (ddDo.firstChild) ddDo.removeChild(ddDo.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddDo.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddDo.appendChild(o); });
+        const cur=settings.actions.do.colour||'#ffffff'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddDo.value = hit? hit.value : '__custom__';
+      }
       setSwitch($('#sw-say-bold'), !!settings.actions.say.bold);
       $('#sel-say-colour').value = settings.actions.say.colour || '#ffffff';
-      const ddSay=$('#dd-say-presets'); if (ddSay){ ddSay.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddSay.value = settings.actions.say.colour || '#ffffff'; }
+      const ddSay=$('#dd-say-presets'); if (ddSay){
+        while (ddSay.firstChild) ddSay.removeChild(ddSay.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddSay.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddSay.appendChild(o); });
+        const cur=settings.actions.say.colour||'#ffffff'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddSay.value = hit? hit.value : '__custom__';
+      }
 
       $('#dd-effects').value   = settings.allCapsEffect || 'None';
       $('#dd-font-family').value = settings.fontFamily || 'inherit';
@@ -2502,32 +3074,56 @@
       // Caps exclusion chips
       const renderCapsEx=()=>{
         const wrap=$('#tf-caps-ex-chips'); if(!wrap) return;
-        wrap.innerHTML='';
+        while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+        while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
         const list=(settings.textFormatting.capsExclusions||[]);
         list.forEach((word, idx)=>{
           const chip=document.createElement('span'); chip.className='chip';
           chip.innerHTML='<span>'+word+'</span><button id="del-ce-'+idx+'" class="reset" title="Remove">×</button>';
           wrap.appendChild(chip);
-          const del=chip.querySelector('#del-ce-'+idx+''); if(del){ del.addEventListener('click',()=>{ settings.textFormatting.capsExclusions.splice(idx,1); persistSettings(); renderCapsEx(); rebuildVisibleParagraphs(); applyGlobal(); reparseNow(); }); }
+          const del=chip.querySelector('#del-ce-'+idx+'"'); if(del){ del.addEventListener('click',()=>{ settings.textFormatting.capsExclusions.splice(idx,1); persistSettings(); renderCapsEx(); rebuildVisibleParagraphs(); applyGlobal(); reparseNow(); }); }
         });
       };
       renderCapsEx();
 
       setSwitch($('#sw-main-bold'), !!settings.textFormatting.mainText.bold);
       $('#sel-main-colour').value = settings.textFormatting.mainText.colour || '#ffffff';
-      const ddMain=$('#dd-main-presets'); if (ddMain){ ddMain.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddMain.value = settings.textFormatting.mainText.colour || '#ffffff'; }
+      const ddMain=$('#dd-main-presets'); if (ddMain){
+        while (ddMain.firstChild) ddMain.removeChild(ddMain.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddMain.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddMain.appendChild(o); });
+        const cur=settings.textFormatting.mainText.colour||'#ffffff'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddMain.value = hit? hit.value : '__custom__';
+      }
 
       setSwitch($('#sw-im-bold'), !!settings.internalMonologue.bold);
       $('#sel-im-colour').value = settings.internalMonologue.colour || '#9ca3af';
-      const ddIm=$('#dd-im-presets'); if (ddIm){ ddIm.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddIm.value = settings.internalMonologue.colour || '#9ca3af'; }
+      const ddIm=$('#dd-im-presets'); if (ddIm){
+        while (ddIm.firstChild) ddIm.removeChild(ddIm.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddIm.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddIm.appendChild(o); });
+        const cur=settings.internalMonologue.colour||'#9ca3af'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddIm.value = hit? hit.value : '__custom__';
+      }
 
       setSwitch($('#sw-it-bold'), !!settings.italics.bold);
       $('#sel-it-colour').value = settings.italics.colour || '#facc15';
-      const ddIt=$('#dd-it-presets'); if (ddIt){ ddIt.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddIt.value = settings.italics.colour || '#facc15'; }
+      const ddIt=$('#dd-it-presets'); if (ddIt){
+        while (ddIt.firstChild) ddIt.removeChild(ddIt.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddIt.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddIt.appendChild(o); });
+        const cur=settings.italics.colour||'#facc15'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddIt.value = hit? hit.value : '__custom__';
+      }
       setSwitch($('#sw-sp-bold'), !!settings.speech.bold);
       $('#sel-sp-colour').value  = settings.speech.colour || '#ffffff';
-      const ddSp=$('#dd-sp-presets'); if (ddSp){ ddSp.innerHTML = COLOR_PRESETS.map(p=>'<option value="'+p.value+'">'+p.name+'</option>').join(''); ddSp.value = settings.speech.colour || '#ffffff'; }
-
+      const ddSp=$('#dd-sp-presets'); if (ddSp){
+        while (ddSp.firstChild) ddSp.removeChild(ddSp.firstChild);
+        const opt=document.createElement('option'); opt.value='__custom__'; opt.textContent='Custom'; ddSp.appendChild(opt);
+        COLOR_PRESETS.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.name; ddSp.appendChild(o); });
+        const cur=settings.speech.colour||'#ffffff'; const hit=COLOR_PRESETS.find(p=>p.value.toLowerCase()===(cur||'').toLowerCase());
+        ddSp.value = hit? hit.value : '__custom__';
+      }
       $('#dd-bg-type').value = settings.backgroundType || 'default';
       $('#sel-bg-colour').value = settings.bgColour || '#111827';
       $('#rng-bg-opacity').value = (typeof settings.bgOpacity==='number'?settings.bgOpacity:100);
@@ -2535,20 +3131,7 @@
       try{ const tfImg = $('#tf-bg-image'); if (tfImg){ tfImg.value = settings.bgImageUrl || ''; } }catch(_){ }
       
       $('#dd-lang').value = settings.languageOverride || 'default';
-
-      // AI Model
-      try{
-        const ddAi=$('#dd-ai-model'); if (ddAi){
-          const models = discoverAiModels();
-          ddAi.innerHTML = '';
-          if (models.length===0){
-            const o=document.createElement('option'); o.value=''; o.textContent=T('None found'); ddAi.appendChild(o);
-          } else {
-            models.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; ddAi.appendChild(o); });
-          }
-          if (settings.aiModel){ ddAi.value = settings.aiModel; }
-        }
-      }catch(_){ }
+      // (AI Model section removed)
 
       rebuildProfileDropdown(); $('#dd-profile').value = activeName;
     };
@@ -2557,10 +3140,11 @@
       const p=panel; if(!p) return;
       const setText=(sel,key)=>{ try{ const n=p.querySelector(sel); if(n) n.textContent=T(key); }catch(_){ } };
       const setTitle=(sel,key)=>{ try{ const n=p.querySelector(sel); if(n) n.setAttribute('title', T(key)); }catch(_){ } };
+      const setLabelFor=(inputSelector, key)=>{ try{ const el=p.querySelector(inputSelector); if(!el) return; const row=el.closest('.row'); if(!row) return; const lbl=row.querySelector('span:first-child'); if(lbl) lbl.textContent=T(key); }catch(_){ } };
       // Tabs
-      setText('.tab[data-tab="actions"]','Actions');
-      setText('.tab[data-tab="format"]','Text Formatting');
-      setText('.tab[data-tab="misc"]','Miscellaneous');
+      setText('.tab[data-tab="actions"]','Actions'); try{ const n=p.querySelector('.tab[data-tab="actions"]'); if(n) n.title=T('Actions'); }catch(_){ }
+      setText('.tab[data-tab="format"]','Text Formatting'); try{ const n=p.querySelector('.tab[data-tab="format"]'); if(n) n.title=T('Text Formatting'); }catch(_){ }
+      setText('.tab[data-tab="misc"]','Miscellaneous'); try{ const n=p.querySelector('.tab[data-tab="misc"]'); if(n) n.title=T('Miscellaneous'); }catch(_){ }
       // Actions section
       setText('section[data-section="actions"] .group:nth-of-type(1) h4','Do');
       setText('section[data-section="actions"] .group:nth-of-type(1) .row:nth-of-type(1) span:first-child','Bold');
@@ -2594,15 +3178,20 @@
       setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(1) span:first-child','Effect');
       setText('section[data-section="format"] .group:nth-of-type(6) .row:nth-of-type(2) span:first-child','Exclusions');
       setText('section[data-section="format"] .group:nth-of-type(7) h4','Font');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(1) span:first-child','Font Family');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(2) span:first-child','Font Size');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(3) span:first-child','Font Weight');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(4) span:first-child','Line Height');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(5) span:first-child','Letter Spacing');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(6) span:first-child','Text Alignment');
-      setText('section[data-section="format"] .group:nth-of-type(7) .row:nth-of-type(7) span:first-child','Paragraphs');
+      setLabelFor('#dd-font-family','Font Family');
+      try{ const lbl=p.querySelector('#row-font-url > span:first-child'); if(lbl) lbl.textContent='Custom Google Fonts URL'; }catch(_){ }
+      setLabelFor('#rng-font-size','Font Size');
+      setLabelFor('#dd-font-weight','Font Weight');
+      setLabelFor('#rng-line-height','Line Height');
+      setLabelFor('#rng-letter-spacing','Letter Spacing');
+      setLabelFor('#dd-text-align','Text Alignment');
+      setLabelFor('#dd-paragraphs','Paragraphs');
       setText('section[data-section="format"] .group:nth-of-type(7) .actions button#rst-font-block','Reset Font');
       p.querySelectorAll('.reset').forEach(b=>{ try{ b.setAttribute('title', T('Reset')); }catch(_){ } });
+      // Helpful titles
+      try{ const t=p.querySelector('#dd-bg-type'); if(t){ t.title=T('Background type'); } }catch(_){ }
+      try{ const t=p.querySelector('#tf-bg-image'); if(t){ t.title=T('Image URL'); } }catch(_){ }
+      try{ const t=p.querySelector('#tf-bg-gradient'); if(t){ t.title=T('Gradient'); } }catch(_){ }
       // Misc → Background
       setText('section[data-section="misc"] .group:nth-of-type(1) h4','Background');
       setText('section[data-section="misc"] .group:nth-of-type(1) .row:nth-of-type(1) span:first-child','Background type');
@@ -2612,15 +3201,15 @@
       setText('#row-bg-image span:first-child','Image URL');
       
       // Misc → AI Model
-      setText('section[data-section="misc"] .group:nth-of-type(2) h4','AI Model');
-      setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Model');
+      setText('section[data-section="misc"] .group:nth-of-type(2) h4','Theme Presets');
+      setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Theme');
       // Misc → Language (shifted to 3 after AI Model)
       setText('section[data-section="misc"] .group:nth-of-type(3) h4','Language');
       setText('section[data-section="misc"] .group:nth-of-type(3) .row:nth-of-type(1) span:first-child','Language override');
       // Misc → Profiles
       setText('section[data-section"misc"] .group:nth-of-type(4) h4','Profiles');
       setText('section[data-section="misc"] .group:nth-of-type(4) .row:nth-of-type(1) span:first-child','Profile');
-      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-save-as','Save as new');
+      setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-save-as','Save');
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-rename','Rename');
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-duplicate','Duplicate');
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-delete','Delete');
@@ -2634,8 +3223,9 @@
       // Update switch titles
       ['#sw-enabled','#sw-do-bold','#sw-say-bold','#sw-im-bold','#sw-it-bold','#sw-sp-bold','#sw-main-bold'].forEach(sel=>{ const el=$(sel); if(el){ setSwitch(el, getSwitch(el)); } });
     };
-
     const harvest=()=>{
+      // Master toggle controls runtime pause as well
+      try{ window.__AIDT_PAUSE__ = !getSwitch($('#sw-enabled')) ? true : false; }catch(_){ }
       settings.enabled = getSwitch($('#sw-enabled'));
 
       settings.actions.do.bold   = getSwitch($('#sw-do-bold'));
@@ -2645,10 +3235,11 @@
 
       settings.allCapsEffect = $('#dd-effects').value || 'None';
       settings.fontFamily    = $('#dd-font-family').value || 'inherit';
-      settings.fontSize      = parseInt($('#rng-font-size').value,10) || 100;
+      const clampNum=(n,min,max,fb)=>{ n=Number(n); if(isNaN(n)) return fb; return Math.max(min, Math.min(max, n)); };
+      settings.fontSize      = clampNum(parseInt($('#rng-font-size').value,10), 80, 160, 100);
       settings.fontWeight    = $('#dd-font-weight').value || 'default';
-      settings.lineHeight    = parseFloat($('#rng-line-height').value) || 1.5;
-      settings.letterSpacing = parseFloat($('#rng-letter-spacing').value) || 0;
+      settings.lineHeight    = clampNum(parseFloat($('#rng-line-height').value), 1.1, 2.0, 1.5);
+      settings.letterSpacing = clampNum(parseFloat($('#rng-letter-spacing').value), -0.05, 0.2, 0);
       settings.textAlign     = $('#dd-text-align').value || 'default';
       settings.paragraphs    = ($('#dd-paragraphs') && $('#dd-paragraphs').value) || 'default';
 
@@ -2664,11 +3255,21 @@
 
       settings.backgroundType = $('#dd-bg-type').value || 'default';
       settings.bgColour       = $('#sel-bg-colour').value || '#111827';
-      settings.bgOpacity      = parseInt($('#rng-bg-opacity').value,10);
-      settings.bgImageUrl     = ($('#tf-bg-image') && $('#tf-bg-image').value) || settings.bgImageUrl || '';
+      settings.bgOpacity      = clampNum(parseInt($('#rng-bg-opacity').value,10), 0, 100, 100);
+      // Sanitize gradient and image url
+      const rawGrad = ($('#tf-bg-gradient') && $('#tf-bg-gradient').value) || settings.bgGradient || '';
+      const rawImg  = ($('#tf-bg-image') && $('#tf-bg-image').value) || settings.bgImageUrl || '';
+      const safeUrl = (s)=>{ try{ const u=new URL(s, location.href); return u.protocol==='http:'||u.protocol==='https:' ? u.href : ''; }catch(_){ return ''; } };
+      const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (/^linear-gradient\(|^radial-gradient\(|^conic-gradient\(/i.test(t)) return t; return ''; }catch(_){ return ''; } };
+      settings.bgGradient     = safeGrad(rawGrad);
+      settings.bgImageUrl     = safeUrl(rawImg);
+      settings.bgImageSize    = ($('#dd-bg-size') && $('#dd-bg-size').value) || settings.bgImageSize || 'cover';
+      settings.bgImagePos     = ($('#dd-bg-pos') && $('#dd-bg-pos').value) || settings.bgImagePos || 'center center';
+      settings.bgImageRepeat  = ($('#dd-bg-repeat') && $('#dd-bg-repeat').value) || settings.bgImageRepeat || 'no-repeat';
+      settings.bgImageAttach  = ($('#dd-bg-attach') && $('#dd-bg-attach').value) || settings.bgImageAttach || 'scroll';
       settings.languageOverride = $('#dd-lang').value || 'default';
       // Persist selected AI model (does not force selection on page here)
-      settings.aiModel = ($('#dd-ai-model') && $('#dd-ai-model').value) || settings.aiModel || '';
+      // (AI Model setting removed)
     };
 
     const bindReset=(id,fn)=>{ const el=$('#'+id); if(!el) return; el.addEventListener('click',()=>{ fn(); refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); }); };
@@ -2695,8 +3296,24 @@
       settings.paragraphs=DEFAULTS.paragraphs;
       refreshUI(); translatePanel(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow();
     });
+    // Per-section restores
+    const confirmRestore = (name)=> confirm('Restore defaults for '+name+'?');
+    const announce=(msg)=>{ try{ const n=panel.querySelector('#aidt-live'); if(n){ n.textContent=''; setTimeout(()=>{ try{ n.textContent=msg; }catch(_){ } }, 0);} }catch(_){ } };
+    const safeApply = (msg)=>{ refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); if(msg) announce(msg); };
+    const btns=[
+      ['rst-do-group', ()=>{ if(!confirmRestore('Do')) return; settings.actions.do=clone(DEFAULTS.actions.do); }],
+      ['rst-say-group',()=>{ if(!confirmRestore('Say')) return; settings.actions.say=clone(DEFAULTS.actions.say); }],
+      ['rst-main-group',()=>{ if(!confirmRestore('Main Text')) return; settings.textFormatting.mainText=clone(DEFAULTS.textFormatting.mainText); }],
+      ['rst-sp-group',  ()=>{ if(!confirmRestore('Speech')) return; settings.speech=clone(DEFAULTS.speech); }],
+      ['rst-im-group',  ()=>{ if(!confirmRestore('Internal Monologue')) return; settings.internalMonologue=clone(DEFAULTS.internalMonologue); }],
+      ['rst-it-group',  ()=>{ if(!confirmRestore('Italics')) return; settings.italics=clone(DEFAULTS.italics); }],
+      ['rst-kw-group',  ()=>{ if(!confirmRestore('Keywords')) return; settings.textFormatting.keywords=[]; }],
+      ['rst-caps-group',()=>{ if(!confirmRestore('All Caps Effects')) return; settings.allCapsEffect=DEFAULTS.allCapsEffect; settings.textFormatting.capsExclusions=[]; }],
+      ['rst-bg-group',  ()=>{ if(!confirmRestore('Background')) return; settings.backgroundType=DEFAULTS.backgroundType; settings.bgColour=DEFAULTS.bgColour; settings.bgOpacity=DEFAULTS.bgOpacity; settings.bgGradient=''; settings.bgImageUrl=''; settings.bgImageSize='cover'; settings.bgImagePos='center center'; settings.bgImageRepeat='no-repeat'; settings.bgImageAttach='scroll'; }],
+    ];
+    btns.forEach(([id,fn])=>{ const b=$('#'+id); if (b) b.addEventListener('click', ()=>{ fn(); safeApply('Restored '+id.replace('rst-','').replace('-group','')); }); });
 
-    const applyLive=()=>{ harvest(); persistSettings(); translatePanel(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); };
+    const applyLive=()=>{ harvest(); persistSettingsDebounced(); translatePanel(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); };
 
     // switches → instant
     ['sw-enabled','sw-do-bold','sw-say-bold','sw-im-bold','sw-sp-bold','sw-main-bold'].forEach(id=>{
@@ -2704,9 +3321,8 @@
       sw.addEventListener('click', ()=>{ const curr=getSwitch(sw); setSwitch(sw,!curr); applyLive(); });
       sw.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); const curr=getSwitch(sw); setSwitch(sw,!curr); applyLive(); } });
     });
-
     // selects/inputs → instant
-    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','dd-paragraphs','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','tf-bg-image','dd-lang','dd-profile','dd-ai-model'].forEach(id=>{
+    ['dd-do-presets','dd-say-presets','dd-main-presets','dd-sp-presets','dd-im-presets','dd-it-presets','sel-do-colour','sel-say-colour','dd-effects','dd-font-family','rng-font-size','dd-font-weight','rng-line-height','rng-letter-spacing','dd-text-align','dd-paragraphs','sel-main-colour','sel-im-colour','sel-it-colour','sel-sp-colour','dd-bg-type','sel-bg-colour','rng-bg-opacity','tf-bg-image','dd-lang','dd-profile'].forEach(id=>{
       const el=$('#'+id); if(!el) return;
       el.addEventListener('input',  applyLive);
       el.addEventListener('change', applyLive);
@@ -2714,8 +3330,8 @@
         el.addEventListener('change', ()=>{
           try{
             const v=$('#dd-paragraphs').value||'default';
-            localStorage.setItem(LS_LAST_PARAGRAPHS, v);
-            localStorage.setItem(lastParKeyFor(activeName), v);
+            safeSet(LS_LAST_PARAGRAPHS, v);
+            safeSet(lastParKeyFor(activeName), v);
             rebuildVisibleParagraphs();
             ensureLatestFormatted();
             bulkNormalizeOverlays();
@@ -2734,15 +3350,98 @@
       }
     });
 
+    // Show custom font URL row only when Custom selected
+    try{
+      const ddFam=$('#dd-font-family'); const rowUrl=$('#row-font-url');
+      const updateFontUrlVis=()=>{ try{ rowUrl.style.display = (ddFam && ddFam.value==='custom') ? '' : 'none'; }catch(_){ } };
+      if (ddFam && rowUrl){ ddFam.addEventListener('change', updateFontUrlVis); updateFontUrlVis(); }
+    }catch(_){ }
+
+    // Link color pickers to preset dropdowns so custom colors set dropdown to Custom and live apply
+    try{
+      const connect=(pickerId, presetId, assign)=>{
+        const pc=$('#'+pickerId); const dd=$('#'+presetId);
+        if (!pc) return;
+        const onInput=()=>{ const v=pc.value; try{ assign(v); }catch(_){ } if (dd){ dd.value='__custom__'; } persistSettingsDebounced(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); };
+        const onChange=()=>{ const v=pc.value; try{ assign(v); }catch(_){ } if (dd){ dd.value='__custom__'; } persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); };
+        pc.addEventListener('input', onInput);
+        pc.addEventListener('change', onChange);
+        if (dd){ dd.addEventListener('change', ()=>{ const v=dd.value==='__custom__'? pc.value : dd.value; try{ assign(v); }catch(_){ } if (dd.value!=='__custom__'){ pc.value=dd.value; } persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); }); }
+      };
+      connect('sel-do-colour','dd-do-presets', v=>{ settings.actions.do.colour=v; });
+      connect('sel-say-colour','dd-say-presets', v=>{ settings.actions.say.colour=v; });
+      connect('sel-main-colour','dd-main-presets', v=>{ settings.textFormatting.mainText.colour=v; });
+      connect('sel-im-colour','dd-im-presets', v=>{ settings.internalMonologue.colour=v; });
+      connect('sel-it-colour','dd-it-presets', v=>{ settings.italics.colour=v; });
+      connect('sel-sp-colour','dd-sp-presets', v=>{ settings.speech.colour=v; });
+    }catch(_){ }
+
+    // Custom Google Fonts apply
+    // Sanitize user-supplied Google Fonts URL to whitelist host, path, and params
+    function sanitizeGoogleFontsUrl(raw){
+      try{
+        const u = new URL(String(raw), location.href);
+        if (u.origin !== 'https://fonts.googleapis.com') return '';
+        if (!(u.pathname === '/css' || u.pathname === '/css2')) return '';
+        const params = new URLSearchParams();
+        if (u.searchParams.has('family')){
+          const fam = u.searchParams.get('family') || '';
+          // Allow common family syntax including ital,wght@ and weights list
+          const cleaned = fam.replace(/[^A-Za-z0-9 \+:,@;()\-]/g, '');
+          if (cleaned.trim()) params.set('family', cleaned.trim());
+        }
+        // Clamp display to known values, default to swap
+        const allowedDisplay = ['swap','block','fallback','optional','auto'];
+        const display = (u.searchParams.get('display')||'swap').toLowerCase();
+        params.set('display', allowedDisplay.includes(display) ? display : 'swap');
+        if (!params.has('family')) return '';
+        return u.origin + u.pathname + '?' + params.toString();
+      }catch(_){ return ''; }
+    }
+    try{
+      const applyCustomFont=()=>{
+        try{
+          const url = ($('#tf-font-url') && $('#tf-font-url').value || '').trim();
+          if (!url) return;
+          const safeUrl = sanitizeGoogleFontsUrl(url);
+          if (!safeUrl) return;
+          if (!document.querySelector('link[rel="preconnect"][href^="https://fonts.gstatic.com"]')){
+            const p=document.createElement('link'); p.rel='preconnect'; p.href='https://fonts.gstatic.com'; p.crossOrigin='anonymous'; document.head.appendChild(p);
+          }
+          const id='aidt-font-custom'; let link=document.getElementById(id);
+          if (!link){ link=document.createElement('link'); link.id=id; link.rel='stylesheet'; document.head.appendChild(link); }
+          link.href=safeUrl;
+        }catch(_){ }
+      };
+      const btn=$('#btn-font-apply'); if (btn){ btn.addEventListener('click', applyCustomFont); }
+    }catch(_){ }
+    // Apply theme preset (opt-in)
+    try{
+      const applyTheme=(name)=>{
+        try{
+          const p = getResolvedThemePreset(name); if (!p) return;
+          // Apply shallow keys
+          Object.keys(p).forEach(k=>{
+            const v=p[k];
+            if (v && typeof v==='object' && !Array.isArray(v)){
+              settings[k] = merge(settings[k]||{}, v);
+            } else {
+              settings[k] = v;
+            }
+          });
+          refreshUI(); translatePanel(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); scheduleBackgroundApply();
+        }catch(_){ }
+      };
+      const ddTheme=$('#dd-theme'); const btnApply=$('#btn-apply-theme');
+      if (ddTheme && btnApply){ btnApply.addEventListener('click', ()=>{ const sel=ddTheme.value||''; if (sel) applyTheme(sel); }); }
+    }catch(_){ }
+
     // Keep background controls visibility in sync with selection
     try{ const ddBg=$('#dd-bg-type'); if (ddBg){ ddBg.addEventListener('change', ()=>{ updateBgUiVisibility(); }); } }catch(_){ }
-
+    try{ const tfGrad=$('#tf-bg-gradient'); if (tfGrad){ tfGrad.addEventListener('input', applyLive); tfGrad.addEventListener('change', applyLive); } }catch(_){ }
+    try{ ['dd-bg-size','dd-bg-pos','dd-bg-repeat','dd-bg-attach'].forEach(id=>{ const el=$('#'+id); if(el){ el.addEventListener('input', applyLive); el.addEventListener('change', applyLive); } }); }catch(_){ }
     // AI Model specific hooks
-    (function(){
-      const dd=$('#dd-ai-model'); const rf=$('#btn-ai-refresh');
-      if (rf) rf.addEventListener('click', ()=>{ try{ openModelMenuIfNeeded(); setTimeout(()=>refreshUI(), 120); }catch(_){ refreshUI(); } });
-      if (dd) dd.addEventListener('change', ()=>{ try{ const name=dd.value||''; if (name) { applyAiModelSelection(name); } }catch(_){ } });
-    })();
+    // (AI Model hooks removed)
 
     // Keyword add: button and Enter key
     const kwInput=$('#tf-keyword-input');
@@ -2750,13 +3449,13 @@
       if (!kwInput) return;
       const v=(kwInput.value||'').trim(); if (!v) return;
       settings.textFormatting.keywords=settings.textFormatting.keywords||[];
-      settings.textFormatting.keywords.push({ text:v, effect:'None', bold:false });
+      settings.textFormatting.keywords.push({ text:v, effect:'None', bold:false, whole:true, caseSensitive:false, regex:false });
+      if (settings.textFormatting.keywords.length>200){ settings.textFormatting.keywords = settings.textFormatting.keywords.slice(-200); }
       kwInput.value='';
       persistSettings(); renderKeywordChips(); reparseNow();
     };
     const addBtn=$('#tf-keyword-add'); if(addBtn) addBtn.addEventListener('click', ()=>{ addKeyword(); applyGlobal(); reparseNow(); });
     if (kwInput){ kwInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addKeyword(); applyGlobal(); reparseNow(); } }); }
-
     // Caps exclusions add/remove
     const exInput=$('#tf-caps-ex-input');
     const addExcl=()=>{
@@ -2770,28 +3469,90 @@
     if (exInput){ exInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addExcl(); } }); }
 
     // Export / Import
+    const SCHEMA_VERSION = 1;
+    const MAX_IMPORT_BYTES = 512 * 1024; // 512 KB guardrail
+    function isPlainObject(o){ return !!o && Object.prototype.toString.call(o)==='[object Object]'; }
+    function validateImportShape(obj){
+      try{
+        if (!isPlainObject(obj)) return 'Invalid file: root is not an object.';
+        if (obj.version !== undefined && typeof obj.version !== 'number') return 'Invalid file: version must be a number.';
+        if (obj.bindings !== undefined && !isPlainObject(obj.bindings)) return 'Invalid file: bindings must be an object.';
+        if (!obj.profiles || !isPlainObject(obj.profiles) || !isPlainObject(obj.profiles.profiles)) return 'Invalid file: profiles.profiles missing.';
+        const names=Object.keys(obj.profiles.profiles);
+        if (names.length > 200) return 'Too many profiles in file.';
+        for (const name of names){
+          if (typeof name !== 'string' || name.length<1 || name.length>64) return 'Invalid profile name encountered.';
+          const cfg=obj.profiles.profiles[name];
+          if (!isPlainObject(cfg)) return 'Profile "'+name+'" is not an object.';
+          // rough per-profile size guard
+          const size = JSON.stringify(cfg).length;
+          if (size > 120*1024) return 'Profile "'+name+'" is too large.';
+        }
+        return '';
+      }catch(_){ return 'Invalid file structure.'; }
+    }
+    const migrateProfiles = (inObj)=>{
+      try{
+        if (!inObj || !inObj.profiles) return inObj;
+        // Example migrations can go here in future
+        return inObj;
+      }catch(_){ return inObj; }
+    };
     $('#btn-export').addEventListener('click', ()=>{
-      const blob={ profiles: loadJSON(LS_PROFILES,{profiles:{}}), bindings: loadJSON(LS_BINDINGS,{}), activeProfile: activeName, exportedAt: new Date().toISOString() };
+      const blob={ version: SCHEMA_VERSION, profiles: loadJSON(LS_PROFILES,{profiles:{}}), bindings: loadJSON(LS_BINDINGS,{}), activeProfile: activeName, exportedAt: new Date().toISOString() };
       const s=JSON.stringify(blob,null,2); const a=document.createElement('a');
-      a.href=URL.createObjectURL(new Blob([s],{type:'application/json'})); a.download='aidt-config-export.json'; a.click();
+      const pad=n=>String(n).padStart(2,'0'); const d=new Date(); const ts=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+      const nameSafe=(activeName||'default').replace(/\W+/g,'_');
+      a.href=URL.createObjectURL(new Blob([s],{type:'application/json'})); a.download='aidt-config-'+nameSafe+'-'+ts+'.json'; a.click();
     });
-    $('#btn-import').addEventListener('click', ()=>$('#file-import').click());
+    $('#btn-export-active').addEventListener('click', ()=>{
+      try{
+        const all=loadJSON(LS_PROFILES,{profiles:{}}); const one={profiles:{}}; one.profiles[activeName]=all.profiles[activeName];
+        const blob={ version: SCHEMA_VERSION, profiles: one, bindings: {}, activeProfile: activeName, exportedAt: new Date().toISOString() };
+        const s=JSON.stringify(blob,null,2); const a=document.createElement('a');
+        const pad=n=>String(n).padStart(2,'0'); const d=new Date(); const ts=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+        a.href=URL.createObjectURL(new Blob([s],{type:'application/json'})); a.download='aidt-profile-'+activeName.replace(/\W+/g,'_')+'-'+ts+'.json'; a.click();
+      }catch(_){ }
+    });
+    const runImport=(mode)=>{ const input=$('#file-import'); input.setAttribute('data-mode', mode||'merge'); input.click(); };
+    $('#btn-import-merge').addEventListener('click', ()=>runImport('merge'));
+    $('#btn-import-replace').addEventListener('click', ()=>{ if (confirm('Import (Replace) will overwrite existing profiles that have the same names. Continue?')) runImport('replace'); });
     $('#file-import').addEventListener('change', ev=>{
       const f=ev.target.files&&ev.target.files[0]; if(!f) return;
+      const mode = ev.target.getAttribute('data-mode') || 'merge';
+      try{ if (f.size > MAX_IMPORT_BYTES){ alert('Import failed: file is larger than '+(MAX_IMPORT_BYTES/1024)+' KB.'); ev.target.value=''; return; } }catch(_){ }
       const r=new FileReader();
       r.onload=()=>{
         try{
           const data=JSON.parse(String(r.result||'{}'));
-          if (data && data.profiles && data.profiles.profiles) saveJSON(LS_PROFILES,data.profiles);
+          const ver = (typeof data.version==='number') ? data.version : 0;
+          const err = validateImportShape(data);
+          if (err){ alert(err); ev.target.value=''; return; }
+          let prof = data && data.profiles ? data.profiles : null;
+          if (prof){
+            prof = migrateProfiles(prof);
+            if (mode==='replace'){
+              saveJSON(LS_PROFILES, prof);
+            } else {
+              // merge: do not overwrite existing profiles; add/merge new keys
+              const cur=loadJSON(LS_PROFILES,{profiles:{}});
+              const merged={profiles:{}};
+              Object.assign(merged.profiles, cur.profiles);
+              for (const name of Object.keys(prof.profiles||{})){
+                if (!merged.profiles[name]) merged.profiles[name]=prof.profiles[name];
+              }
+              saveJSON(LS_PROFILES, merged);
+            }
+          }
           if (data && data.bindings) saveJSON(LS_BINDINGS,data.bindings);
           if (data && data.activeProfile && loadJSON(LS_PROFILES,{profiles:{}}).profiles[data.activeProfile]) {
-            activeName=data.activeProfile; localStorage.setItem(ACTIVE_PROFILE,activeName);
+            activeName=data.activeProfile; safeSet(ACTIVE_PROFILE,activeName);
             settings=merge(DEFAULTS, loadJSON(LS_PROFILES,{profiles:{}}).profiles[activeName]);
             publishSettings();
           }
           profiles=loadJSON(LS_PROFILES,{profiles:{}}); bindings=loadJSON(LS_BINDINGS,{});
           refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); ev.target.value='';
-        }catch(e){ /* import failed (silenced) */ }
+        }catch(e){ alert('Import failed: '+(e&&e.message||'invalid JSON')); ev.target.value=''; }
       };
       r.readAsText(f);
     });
@@ -2802,7 +3563,7 @@
     function switchProfile(name){
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
       if(!profiles.profiles[name]) return;
-      activeName=name; localStorage.setItem(ACTIVE_PROFILE,name);
+      activeName=name; safeSet(ACTIVE_PROFILE,name);
       settings=merge(DEFAULTS, profiles.profiles[name]);
       publishSettings();
       refreshUI(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow();
@@ -2810,34 +3571,47 @@
     $('#pf-save-as').addEventListener('click', ()=>{
       harvest(); const name=promptName('Save current settings as profile:','Custom'); if(!name) return;
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
-      profiles.profiles[name]=clone(settings); saveJSON(LS_PROFILES,profiles);
-      activeName=name; localStorage.setItem(ACTIVE_PROFILE,name);
+      profiles._meta = profiles._meta || { lastModifiedAt: {} };
+      profiles.profiles[name]=clone(settings); try{ profiles._meta.lastModifiedAt[name]=new Date().toISOString(); }catch(_){ }
+      saveJSON(LS_PROFILES,profiles);
+      activeName=name; safeSet(ACTIVE_PROFILE,name);
       rebuildProfileDropdown(); $('#dd-profile').value=name;
     });
     $('#pf-rename').addEventListener('click', ()=>{
       const name=promptName('Rename profile:',activeName); if(!name||name===activeName) return;
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
       if (profiles.profiles[name]) { alert('A profile with that name already exists.'); return; }
+      profiles._meta = profiles._meta || { lastModifiedAt: {} };
       profiles.profiles[name]=profiles.profiles[activeName]; delete profiles.profiles[activeName];
+      try{ profiles._meta.lastModifiedAt[name]=new Date().toISOString(); delete profiles._meta.lastModifiedAt[activeName]; }catch(_){ }
       const b=loadJSON(LS_BINDINGS,{}); Object.keys(b).forEach(k=>{ if(b[k]===activeName) b[k]=name; });
       saveJSON(LS_BINDINGS,b); saveJSON(LS_PROFILES,profiles);
-      activeName=name; localStorage.setItem(ACTIVE_PROFILE,name);
+      activeName=name; safeSet(ACTIVE_PROFILE,name);
       rebuildProfileDropdown(); $('#dd-profile').value=name;
     });
     $('#pf-duplicate').addEventListener('click', ()=>{
       const name=promptName('Duplicate profile as:',activeName+' Copy'); if(!name) return;
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
-      profiles.profiles[name]=clone(profiles.profiles[activeName]); saveJSON(LS_PROFILES,profiles);
+      profiles._meta = profiles._meta || { lastModifiedAt: {} };
+      profiles.profiles[name]=clone(profiles.profiles[activeName]); try{ profiles._meta.lastModifiedAt[name]=new Date().toISOString(); }catch(_){ }
+      saveJSON(LS_PROFILES,profiles);
       rebuildProfileDropdown(); $('#dd-profile').value=activeName;
     });
     $('#pf-delete').addEventListener('click', ()=>{
       if (activeName==='Default') { alert('Cannot delete Default profile.'); return; }
       if (!confirm('Delete profile "'+activeName+'"?')) return;
       profiles=loadJSON(LS_PROFILES,{profiles:{}});
-      delete profiles.profiles[activeName]; saveJSON(LS_PROFILES,profiles);
+      profiles._meta = profiles._meta || { lastModifiedAt: {} };
+      delete profiles.profiles[activeName]; try{ delete profiles._meta.lastModifiedAt[activeName]; }catch(_){ }
+      saveJSON(LS_PROFILES,profiles);
       const b=loadJSON(LS_BINDINGS,{}); Object.keys(b).forEach(k=>{ if(b[k]===activeName) delete b[k]; });
+      // prune orphaned bindings pointing to missing profiles
+      try{
+        const cur=loadJSON(LS_PROFILES,{profiles:{}});
+        Object.keys(b).forEach(k=>{ if(!cur.profiles[b[k]]) delete b[k]; });
+      }catch(_){ }
       saveJSON(LS_BINDINGS,b);
-      activeName='Default'; localStorage.setItem(ACTIVE_PROFILE,'Default');
+      activeName='Default'; safeSet(ACTIVE_PROFILE,'Default');
       settings=merge(DEFAULTS, loadJSON(LS_PROFILES,{profiles:{}}).profiles[activeName]);
       publishSettings();
       rebuildProfileDropdown(); $('#dd-profile').value=activeName;
@@ -2860,12 +3634,13 @@
 
     // Quick actions
     $('#reset-all').addEventListener('click', ()=>{ if(!confirm('Reset all AIDT settings to defaults?')) return; settings=clone(DEFAULTS); settings.enabled=false; refreshUI(); persistSettings(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); });
-
     // Tabs
-    const tabs=panel.querySelectorAll('.tab'), sections=panel.querySelectorAll('.section');
+    const tabs = panel.querySelectorAll('.tab'), sections = panel.querySelectorAll('.section');
     const showTab=key=>{
       sections.forEach(sec=>sec.classList.toggle('active', sec.getAttribute('data-section')===key));
       tabs.forEach(t=>t.setAttribute('aria-selected', String(t.getAttribute('data-tab')===key)));
+      try{ safeSet('aidt:lastTab', key); }catch(_){ }
+      try{ settings.uiLastTab = key; persistSettingsDebounced(); }catch(_){ }
     };
     tabs.forEach(t=>{
       t.addEventListener('click', ()=>showTab(t.getAttribute('data-tab')));
@@ -2878,9 +3653,10 @@
       });
     });
 
-    btn.addEventListener('click', ()=>panel.classList.toggle('open'));
-    $('#close').addEventListener('click', ()=>panel.classList.remove('open'));
+    btn.addEventListener('click', ()=>{ togglePanel(); try{ const last=safeGet('aidt:lastTab'); if (last) showTab(last); }catch(_){ } });
+    $('#close').addEventListener('click', ()=>closePanel());
 
+    try{ const last=(safeGet('aidt:lastTab')||'') || (settings && settings.uiLastTab) || ''; if (last){ showTab(last); setTimeout(()=>showTab(last), 30); } else { showTab('actions'); } }catch(_){ showTab('actions'); }
     refreshUI();
     // Ensure dropdown reflects restored settings (even when panel starts hidden)
     try{ const dd=panel.querySelector('#dd-paragraphs'); if (dd && dd.value !== (settings.paragraphs||'default')) dd.value = (settings.paragraphs||'default'); }catch(_){ }
@@ -2927,7 +3703,50 @@
     }catch(e){}
   }
 
-  const observer=new MutationObserver(muts=>{
+  // Cross-tab settings sync: apply changes from other tabs via storage events
+  function setupCrossTabSync(){
+    try{
+      if (window.__AIDT_SYNC_INSTALLED__) return; window.__AIDT_SYNC_INSTALLED__=true;
+      window.addEventListener('storage', function(ev){
+        try{
+          if (!ev || (ev.storageArea && ev.storageArea !== localStorage)) return;
+          const key = String(ev.key||''); if (!key) return;
+          const isRelevant = (
+            key===LS_PROFILES || key===LS_BINDINGS || key===ACTIVE_PROFILE ||
+            key===LS_LAST_PARAGRAPHS || key.indexOf('aidt:config:lastParagraphs:')===0
+          );
+          if (!isRelevant) return;
+          // Reload profiles/bindings and compute active profile
+          profiles = loadJSON(LS_PROFILES,{profiles:{}});
+          bindings = loadJSON(LS_BINDINGS,{});
+          const bound2 = bindings[urlKey];
+          let nextActive = bound2 || (safeGet(ACTIVE_PROFILE) || 'Default');
+          if (!profiles.profiles[nextActive]) nextActive='Default';
+          activeName = nextActive;
+          settings = merge(DEFAULTS, profiles.profiles[activeName] || {});
+          publishSettings();
+          try{ refreshUI(); }catch(_){ }
+          try{ applyGlobal(); retrofitAllCapsAndKeywords(); }catch(_){ }
+          try{ reparseNow(); ensureLatestFormatted(); }catch(_){ }
+          try{ scheduleBackgroundApply(); }catch(_){ }
+        }catch(_){ }
+      }, false);
+    }catch(_){ }
+  }
+
+  // Unified keyed retry helper for follow-up ensures
+  function scheduleEnsures(key, fn){
+    try{
+      window.__AIDT_SCHED__ = window.__AIDT_SCHED__ || Object.create(null);
+      if (window.__AIDT_SCHED__[key]) return;
+      window.__AIDT_SCHED__[key] = true;
+      const steps = [120,300,600,1000,1600,2500];
+      steps.forEach(ms=> setTimeout(()=>{ try{ fn(); }catch(_){ } }, ms));
+      setTimeout(()=>{ try{ delete window.__AIDT_SCHED__[key]; }catch(_){ } }, steps[steps.length-1] + 50);
+    }catch(_){ }
+  }
+
+  const observer=createAidtObserver(muts=>{
     for (const m of muts){
       if ((m.type==='childList' && m.addedNodes && m.addedNodes.length) || m.type==='characterData'){
         __aidt_reparse2();  // parse any new/changed nodes
@@ -2946,11 +3765,13 @@
       try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); bulkNormalizeOverlays(); }catch(_){ }
       // Apply base text immediately on load
       try{ applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
-      // Force an initial latest parse-and-style sweep after first paint, then apply background last
-      try{ setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); bulkNormalizeOverlays(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (typeof AIDT_applySayDo==='function'){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, 60); }catch(_e1){}
+      // Force an initial latest parse-and-style sweep after first paint, add tiny jitter to avoid hydration collisions
+      try{ const jitter = 60 + Math.floor(Math.random()*20)+5; setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); bulkNormalizeOverlays(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, jitter); }catch(_e1){}
       // Also trigger a background apply a bit later in case UI finished mounting after our first attempt
       try{ setTimeout(()=>{ try{ scheduleBackgroundApply(); }catch(_s2){} }, 450); }catch(_s1){}
       observer.observe(document.body, { childList:true, subtree:true, characterData:true });
+      // Attach visible-only observer after initial mount
+      try{ attachVisibleObserver(); }catch(_){ }
       // Begin watching the overlay to normalize split-word spans continuously
       try{ setupOverlayObserver(); /* normalizeOverlay intentionally deferred to avoid wiping newest before spans */ }catch(_){ }
       // Toggle debug: Ctrl+Alt+D
@@ -2958,8 +3779,8 @@
         window.addEventListener('keydown', function(e){
           try{
             if (e.ctrlKey && e.altKey && (e.key==='d' || e.key==='D')){
-              const cur = (localStorage.getItem('AIDT_DEBUG')==='1');
-              localStorage.setItem('AIDT_DEBUG', cur?'0':'1');
+              const cur = (safeGet('AIDT_DEBUG')==='1');
+              safeSet('AIDT_DEBUG', cur?'0':'1');
               if (!window.__AIDT_DEBUG__ && !cur) window.__AIDT_DEBUG__ = true; // allow temporary session toggle
               dbg('Debug toggled. Now:', !cur);
               setTimeout(()=>{ try{ ensureLatestFormatted(); }catch(_){ } }, 0);
@@ -2968,7 +3789,13 @@
         }, true);
       }catch(_){ }
       setupFormatObserver();
-      [0,150,350,700,1200,2000,3500].forEach(ms=>setTimeout(()=>{ __aidt_reparse2(); __aidt_reapply2(); ensureLatestFormatted(); }, ms));
+      setupCrossTabSync();
+      try{
+        const clear = ()=>{ try{ if (window.__AIDT_PRUNE_TIMER__){ clearInterval(window.__AIDT_PRUNE_TIMER__); window.__AIDT_PRUNE_TIMER__=null; } }catch(_){ } };
+        window.addEventListener('pagehide', clear, { once:true });
+        window.addEventListener('beforeunload', clear, { once:true });
+      }catch(_){ }
+      [0,150,350,700,1200,2000,3500].forEach(ms=>setTimeout(()=>{ if (document.visibilityState==='hidden') return; __aidt_reparse2(); __aidt_reapply2(); ensureLatestFormatted(); }, ms));
       if (api && api.showTab) api.showTab('actions');
       // Robust post-click retries for newest paragraph becoming non-editable
       document.addEventListener('click', function(e){
@@ -2977,7 +3804,7 @@
           if (!el) return;
           var t = (el.textContent || '').toLowerCase();
           if (/continue|take a turn|retry|erase|send|submit|undo|redo|edit/.test(t)){
-            [120,300,600,1000,1600,2500].forEach(function(ms){ setTimeout(function(){ __aidt_reparse2(); __aidt_reapply2(); ensureLatestFormatted(); }, ms); });
+            scheduleEnsures('post-click-ensure', function(){ if (document.visibilityState==='hidden') return; __aidt_reparse2(); __aidt_reapply2(); ensureLatestFormatted(); });
           }
         }catch(err){}
       }, true);
@@ -2998,7 +3825,7 @@
             return !!(target.closest('#gameplay-output') || target.closest('#transition-opacity') || target.closest('#do-not-copy') || target.closest('[data-testid="adventure-text"]'));
           }catch(_){ return false; }
         };
-        document.addEventListener('pointerdown', function(ev){ try{ if (shouldPause(ev.target)) doPause(900); }catch(_){ } }, true);
+        document.addEventListener('pointerdown', function(ev){ try{ if (shouldPause(ev.target)) doPause(900); }catch(_){ } }, {capture:true, passive:true});
         document.addEventListener('contextmenu', function(ev){ try{ if (shouldPause(ev.target)) doPause(1200); }catch(_){ } }, true);
         document.addEventListener('focusin', function(ev){ try{ if (ev.target && ev.target.closest && ev.target.closest('[contenteditable="true"]')) doPause(900); }catch(_){ } }, true);
       })();
@@ -3009,11 +3836,7 @@
   document.addEventListener('keydown', e=>{ try{ if (e.ctrlKey && e.altKey && (e.key==='p'||e.key==='P')){ __aidt_reparse2(); __aidt_reapply2(); } }catch{} }, true);
   if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', start, {once:true});
   else start();
-
 })();
-
-
-
 /* ==== AIDT SAY/DO PATCH (ES5-safe, isolated) ==== */
 (function(){
   if (window.__AIDT_SAYDO_PATCH__) return;
@@ -3165,8 +3988,9 @@ for (var b=0;b<doBlocks.length;b++){
   }
 
   try{
-    var mo = new MutationObserver(function(){ try{ AIDT_applySayDo(document); }catch(e){} });
+    var mo = createAidtObserver(function(){ try{ AIDT_applySayDo(document); }catch(e){} });
     mo.observe(document.documentElement, {subtree:true, childList:true, characterData:true, attributes:true});
+    try{ if (window.__AIDT_OBSERVERS_ADD__) window.__AIDT_OBSERVERS_ADD__(mo); }catch(_){ }
     document.addEventListener('click', function(e){
       try{
         var el = e.target && e.target.closest ? e.target.closest('button,[role=\"button\"],a') : null;
@@ -3195,7 +4019,6 @@ for (var b=0;b<doBlocks.length;b++){
     window.__AIDT_CORE__.ensure = ensureLatestFormatted;
   }
 }catch(e){}})();
-
 /* ==== AIDT: Robust last-paragraph handling (attributes + action waiters) ==== */
 (function(){
   try{
@@ -3207,7 +4030,7 @@ for (var b=0;b<doBlocks.length;b++){
       }catch(_){}
     }
     // Attribute observer: watch for contenteditable/class/aria-busy flips anywhere
-    var attrObserver = new MutationObserver(function(muts){
+    var attrObserver = createAidtObserver(function(muts){
       for (var i=0;i<muts.length;i++){
         var m = muts[i];
         if (m.type === 'attributes' && (m.attributeName === 'contenteditable' || m.attributeName === 'class' || m.attributeName === 'aria-busy')){
