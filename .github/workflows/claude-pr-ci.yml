@@ -1,0 +1,37 @@
+# When the CI workflow finishes on a branch the Claude Code Action made (claude/...), tell #bosun the result at
+# once, via the DISCORD_BOSUN_WEBHOOK secret. Kept separate from ci.yml so the CI file stays as it is.
+name: Claude PR CI result
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+jobs:
+  tell:
+    if: startsWith(github.event.workflow_run.head_branch, 'claude/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          WEBHOOK: ${{ secrets.DISCORD_BOSUN_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "no DISCORD_BOSUN_WEBHOOK secret; skipping"; exit 0; fi
+          short="${REPO##*/}"
+          pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open --json number,url --jq '.[0] | "\(.number)\t\(.url)"' || true)
+          num=$(printf '%s' "$pr" | cut -f1); url=$(printf '%s' "$pr" | cut -f2)
+          [ -z "$url" ] && url="$RUN_URL"
+          case "$CONCLUSION" in
+            success) msg="✅ **${short}** PR #${num:-?} CI green — say \`merge it\` when you want it deployed.
+          ${url}" ;;
+            failure|timed_out) msg="❌ **${short}** PR #${num:-?} CI failed — ask me for the log, or tell Claude what to fix.
+          ${url}" ;;
+            *) msg="⚠️ **${short}** PR #${num:-?} CI ended: ${CONCLUSION}.
+          ${url}" ;;
+          esac
+          jq -n --arg u Bosun --arg c "$msg" '{username: $u, content: $c}' | curl -sS -m 20 -H "Content-Type: application/json" -d @- "$WEBHOOK" -o /dev/null -w "discord: %{http_code}\n"
