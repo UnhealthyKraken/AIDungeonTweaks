@@ -1,0 +1,80 @@
+# Claude Code GitHub Action: "@claude" in a new issue, an issue comment or a PR review comment starts a run
+# that implements the request on a runner and opens a PR. Bosun (Discord) opens the issues; Curt merges.
+# Auth = subscription token (repo secret CLAUDE_CODE_OAUTH_TOKEN, from `claude setup-token`). The action
+# pushes as the Claude GitHub App, so ci.yml runs on its PRs.
+name: Claude Code
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+jobs:
+  claude:
+    # Only the repo owner can start a run. Without this, anyone who can open an issue on a public repo could
+    # spend Curt's Claude subscription and steer the agent. Bosun opens issues with Curt's token, so it is OWNER.
+    if: >-
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')
+        && github.event.issue.author_association == 'OWNER') ||
+      (github.event_name != 'issues' && contains(github.event.comment.body, '@claude')
+        && github.event.comment.author_association == 'OWNER')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        id: claude
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Bash is off by default in the action, so without the first pattern Claude only pushes a branch
+          # and posts a "Create PR" link (seen on issue #13). The action exports its app token as GH_TOKEN.
+          # Nothing else in Bash is allowed.
+          # A prefix rule never matches a command with a heredoc or $(...) in it, so a multi-line PR body
+          # passed inline is silently refused and Claude falls back to the "Create PR" link (issue #15).
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Bash(gh pr create:*)"
+            --append-system-prompt "To open the pull request: write the body to a file with the Write tool, then run gh pr create with --title and --body-file pointing at that file. Never put a heredoc, command substitution or a multi-line string inside the gh command; the permission rule cannot match those and the PR will not be created."
+      # Instant news in #bosun (Discord webhook secret DISCORD_BOSUN_WEBHOOK): the PR the run opened, or that it
+      # ended without one. Bosun's own poller only nudges about PRs left idle; this is where "opened" comes from.
+      - name: Tell Bosun's channel
+        if: always() && steps.claude.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEBHOOK: ${{ secrets.DISCORD_BOSUN_WEBHOOK }}
+          BRANCH: ${{ steps.claude.outputs.branch_name }}
+          CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "no DISCORD_BOSUN_WEBHOOK secret; skipping"; exit 0; fi
+          short="${REPO##*/}"
+          pr=""
+          if [ -n "$BRANCH" ]; then
+            pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open --json number,title,url --jq '.[0] | "\(.number)\t\(.title)\t\(.url)"' || true)
+          fi
+          if [ -n "$pr" ]; then
+            num=$(printf '%s' "$pr" | cut -f1); title=$(printf '%s' "$pr" | cut -f2); url=$(printf '%s' "$pr" | cut -f3)
+            msg="📬 **${short}** PR #${num} opened by Claude: ${title}
+          ${url}
+          CI running — I'll say when it's green or red."
+          elif [ "$CONCLUSION" = "success" ]; then
+            msg="⚠️ Claude finished on **${short}** but opened no PR. Its comment on the issue says why.
+          ${RUN_URL}"
+          else
+            msg="❌ Claude's run on **${short}** failed (${CONCLUSION:-unknown}) — no PR.
+          ${RUN_URL}"
+          fi
+          jq -n --arg u Bosun --arg c "$msg" '{username: $u, content: $c}' | curl -sS -m 20 -H "Content-Type: application/json" -d @- "$WEBHOOK" -o /dev/null -w "discord: %{http_code}\n"
