@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
       - uses: anthropics/claude-code-action@v1
         id: claude
         with:
@@ -45,7 +45,7 @@ jobs:
           # passed inline is silently refused and Claude falls back to the "Create PR" link (issue #15).
           claude_args: >-
             --max-turns 60
-            --allowedTools "Bash(gh pr create:*)"
+            --allowedTools "Bash(gh pr create:*),Bash(npm ci:*),Bash(npm install:*),Bash(npm test:*),Bash(npm run:*),Bash(node --test:*),Bash(gh pr view:*),Bash(gh run list:*),Bash(gh run view:*)"
             --append-system-prompt "To open the pull request: write the body to a file with the Write tool, then run gh pr create with --title and --body-file pointing at that file. Never put a heredoc, command substitution or a multi-line string inside the gh command; the permission rule cannot match those and the PR will not be created."
       # Instant news in #bosun (Discord webhook secret DISCORD_BOSUN_WEBHOOK): the PR the run opened, or that it
       # ended without one. Bosun's own poller only nudges about PRs left idle; this is where "opened" comes from.
@@ -57,24 +57,31 @@ jobs:
           BRANCH: ${{ steps.claude.outputs.branch_name }}
           CONCLUSION: ${{ steps.claude.outputs.conclusion }}
           REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "no DISCORD_BOSUN_WEBHOOK secret; skipping"; exit 0; fi
           short="${REPO##*/}"
           pr=""
           if [ -n "$BRANCH" ]; then
-            pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open --json number,title,url --jq '.[0] | "\(.number)\t\(.title)\t\(.url)"' || true)
+            pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open --json number,title,url --jq '.[0] // empty | "\(.number)\t\(.title)\t\(.url)"' || true)
           fi
           if [ -n "$pr" ]; then
             num=$(printf '%s' "$pr" | cut -f1); title=$(printf '%s' "$pr" | cut -f2); url=$(printf '%s' "$pr" | cut -f3)
             msg="📬 **${short}** PR #${num} opened by Claude: ${title}
           ${url}
           CI running — I'll say when it's green or red."
-          elif [ "$CONCLUSION" = "success" ]; then
-            msg="⚠️ Claude finished on **${short}** but opened no PR. Its comment on the issue says why.
-          ${RUN_URL}"
           else
-            msg="❌ Claude's run on **${short}** failed (${CONCLUSION:-unknown}) — no PR.
+            why=$(gh api "repos/$REPO/issues/${ISSUE}/comments" --jq '[.[] | select(.user.login == "claude[bot]")] | .[-1].body // empty' 2>/dev/null | head -c 1200 || true)
+            [ -z "$why" ] && why="(no comment found — see the run)"
+            if [ "$CONCLUSION" = "success" ]; then
+              msg="⚠️ Claude finished on **${short}** but opened no PR:
+          ${why}
           ${RUN_URL}"
+            else
+              msg="❌ Claude's run on **${short}** failed (${CONCLUSION:-unknown}):
+          ${why}
+          ${RUN_URL}"
+            fi
           fi
-          jq -n --arg u Bosun --arg c "$msg" '{username: $u, content: $c}' | curl -sS -m 20 -H "Content-Type: application/json" -d @- "$WEBHOOK" -o /dev/null -w "discord: %{http_code}\n"
+          jq -n --arg u Bosun --arg c "$msg" '{username: $u, content: $c, allowed_mentions: {parse: []}}' | curl -sS -m 20 -H "Content-Type: application/json" -d @- "$WEBHOOK" -o /dev/null -w "discord: %{http_code}\n"
