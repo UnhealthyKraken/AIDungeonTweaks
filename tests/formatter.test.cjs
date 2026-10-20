@@ -94,7 +94,7 @@ test('deep formatting preserves story paragraphs, action controls and overlappin
 });
 test('deep formatting leaves editable, ignored and interactive nodes untouched', () => {
   const excluded = ['input','textarea','script','style','template','code','pre','button','a','select','option'].map(tag => new Element(tag, {}, ['*keep*']));
-  excluded.push(new Element('span', { contenteditable: 'true' }, ['*typing*']));
+  for (const mode of ['true', '', 'plaintext-only']) excluded.push(new Element('span', { contenteditable: mode }, ['*typing*']));
   excluded.push(new Element('span', { role: 'button' }, ['*click*']));
   const story = new Element('div', { id: 'gameplay-output' }, excluded);
   fixture([story]).parse();

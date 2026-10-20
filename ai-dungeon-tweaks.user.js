@@ -976,6 +976,8 @@
   function isFormattingExcluded(el){
     if (!el || isDanger(el)) return true;
     if (el.closest('input,textarea,script,style,template,code,pre,button,a,select,option,[role="button"],[contenteditable="true"]')) return true;
+    const editable = el.closest('[contenteditable]');
+    if (editable && editable.getAttribute('contenteditable') !== 'false') return true;
     const row = el.closest('#transition-opacity');
     return !!(el.closest('#action-icon') || (row && row.querySelector('#action-icon')));
   }
@@ -1010,6 +1012,8 @@
   }
 
   const parseRootsDeep = ()=>{
+    const perfOn = __aidt_isDebugEnabled && __aidt_isDebugEnabled();
+    try{ if (perfOn && performance && performance.mark) performance.mark('aidt:parse:start'); }catch(_){ }
     if (!settings.enabled) return;
     try{ __AIDT_TEXT_CACHE = new WeakMap(); __AIDT_PICK_CACHE = new WeakMap(); }catch(_){ }
     const seen = new WeakSet();
@@ -1018,6 +1022,7 @@
       root.classList.add('aidt-scope');
       formatTextNodes(root, seen);
     }
+    try{ if (perfOn && performance && performance.mark) { performance.mark('aidt:parse:end'); performance.measure('aidt:parse', 'aidt:parse:start', 'aidt:parse:end'); } }catch(_){ }
   };
 
   const reparse    = debounce(()=>parseRootsDeep(), 50);
