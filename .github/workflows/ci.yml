@@ -21,3 +21,4 @@ jobs:
         with:
           node-version: 22
       - run: node --check ai-dungeon-tweaks.user.js
+      - run: node --test tests/*.test.cjs
