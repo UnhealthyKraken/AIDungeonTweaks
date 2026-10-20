@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Dungeon Tweaks
 // @namespace    kraken.aidt
-// @version      1.4.9
+// @version      1.5.0
 // @author       Kraken
 // @homepageURL  https://github.com/UnhealthyKraken/AIDungeonTweaks
 // @supportURL   https://github.com/UnhealthyKraken/AIDungeonTweaks/issues
@@ -17,6 +17,36 @@
 
 (function(){
   'use strict';
+
+  // Per-element DOM patch: after we modify an element's innerHTML, prevent React
+  // from crashing when it tries to reconcile. Only patched on modified elements,
+  // not globally on Node.prototype (which caused content doubling).
+  function __aidt_guardElement(el){
+    try{
+      if (!el || el.__aidt_guarded) return;
+      el.__aidt_guarded = true;
+      var origRC = el.removeChild;
+      el.removeChild = function(child){
+        try{
+          if (child && child.parentNode !== this) return child;
+          return origRC.call(this, child);
+        }catch(e){
+          if (/not a child/.test(e.message)) return child;
+          throw e;
+        }
+      };
+      var origIB = el.insertBefore;
+      el.insertBefore = function(newNode, refNode){
+        try{
+          if (refNode && refNode.parentNode !== this) return origIB.call(this, newNode, null);
+          return origIB.call(this, newNode, refNode);
+        }catch(e){
+          if (/not a child/.test(e.message)){ try{ return this.appendChild(newNode); }catch(_){ return newNode; } }
+          throw e;
+        }
+      };
+    }catch(_){}
+  }
 
   // AIDT: Safely track and disconnect observers on navigation
   (function(){
@@ -97,6 +127,8 @@
 
   const DEFAULTS = {
     enabled: true,
+    
+    autoClickClaim: false,
 
     // regex feature toggles
     rBold: true, rItalic: true, rSpeechWeight: true, rStrike: true, rCode: true, rHighlight: true, rColour: true,
@@ -377,6 +409,7 @@
   const debounce  = (fn, ms)=>{ let t=null; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); }; };
 
   // Pause-aware observer factory that auto-registers and de-dupes observe calls
+  window.createAidtObserver = createAidtObserver;
   function createAidtObserver(callback){
     try{
       const mo = new MutationObserver(function(){
@@ -390,16 +423,26 @@
     }catch(_){ return new MutationObserver(callback); }
   }
 
-  // Safe HTML replacement helper using DOM operations (avoids direct innerHTML where possible)
+  // Safe HTML replacement helper — uses innerHTML to avoid breaking React's DOM tree.
+  // Targets the innermost text-bearing span to preserve React's wrapper structure.
   function AIDT_replaceHTML(target, html){
     try{
       if (!target || html==null) return;
       if (window.AIDT_isPaused && window.AIDT_isPaused()) return;
       try{ window.AIDT_pause && window.AIDT_pause(); }catch(_){ }
-      const tpl=document.createElement('template');
-      try{ tpl.innerHTML=String(html); }catch(_ih){ try{ target.innerHTML=String(html); return; }catch(_fb){} }
-      while (target.firstChild) { try{ target.removeChild(target.firstChild); }catch(_rm){ break; } }
-      try{ target.appendChild(tpl.content.cloneNode(true)); }catch(_ap){ try{ target.innerHTML=String(html); }catch(_fb2){} }
+      // If target is a #transition-opacity span with a single child <span>, target that child
+      // to preserve React's wrapper structure.
+      let actual = target;
+      try{
+        if (target.id === 'transition-opacity' && target.children && target.children.length === 1 &&
+            target.children[0].tagName === 'SPAN' && !target.children[0].id){
+          actual = target.children[0];
+        }
+      }catch(_){}
+      try{ actual.innerHTML=String(html); }catch(_){ }
+      // Guard this element against React removeChild crashes
+      try{ __aidt_guardElement(actual); }catch(_){ }
+      try{ if (actual !== target) __aidt_guardElement(target); }catch(_){ }
     }finally{ try{ window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }
   }
 
@@ -536,25 +579,18 @@
 
   // ---------------- Containers (single source of truth) ----------------
   const KNOWN_CONTAINERS = [
-    '#do-not-copy',
     '#transition-opacity',
     '#gameplay-output',
-    '[data-testid="adventure-text"]',
-    '[data-testid="story-container"]',
-    '[data-testid="message-text"]',
-    '[data-testid="playback-content"]',
     // AI Dungeon headings/body text wrappers
     'span.font_heading',
-    'span.font_gameplay', 'p.font_gameplay', 'div.font_gameplay',
+    'span.font_gameplaySans', 'p.font_gameplaySans', 'div.font_gameplaySans',
     // AI Dungeon specific wrappers for the newest paragraph
-    '#gameplay-output #do-not-copy',
     '#gameplay-output #transition-opacity',
     '#gameplay-output span._blw-0hover-0px',
     'span._blw-0hover-0px',
-    '.w_comment', '.w-comment',              // SAY/comment blocks
-    'main [class*="prose"]',
-    'article',
-    'blockquote'                              // catch "You say ..." layouts
+    // Story container (role="article")
+    '[role="article"][aria-label="Story"]',
+    'article'
   ];
   const getRoots = ()=>{
     const set=new Set();
@@ -584,7 +620,7 @@
     }catch{ return true; }
   };
   const isWithinEditable = el => { try{ return !!(el && el.closest && el.closest('[contenteditable="true"]')); }catch{ return false; } };
-  const isEditingActive = ()=>{ try{ const ed=document.querySelector('[contenteditable="true"]'); if(!ed||!ed.closest) return false; return !!(ed.closest('#gameplay-output')||ed.closest('#transition-opacity')||ed.closest('#do-not-copy')); }catch(_){ return false; } };
+  const isEditingActive = ()=>{ try{ const ed=document.querySelector('[contenteditable="true"]'); if(!ed||!ed.closest) return false; return !!(ed.closest('#gameplay-output')||ed.closest('#transition-opacity')); }catch(_){ return false; } };
   const hasVisibleDesc = (root, selector)=>{
     try{
       const list = root && root.querySelectorAll ? root.querySelectorAll(selector) : [];
@@ -673,17 +709,23 @@
     return parts.join('');
   };
 
+  let __kwRegexCache = null, __kwRegexKey = '';
   const buildKeywordRegex = ()=>{
     const list=(settings.textFormatting.keywords||[]).filter(Boolean);
-    if (!list.length) return null;
-    const esc=list.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
-    try{ return new RegExp('(' + esc.join('|') + ')','gi'); }catch{ return null; }
+    if (!list.length){ __kwRegexCache=null; __kwRegexKey=''; return null; }
+    const key=list.map(k=>typeof k==='object'?(k.text||''):k).join('|');
+    if (key===__kwRegexKey && __kwRegexCache) return new RegExp(__kwRegexCache.source, __kwRegexCache.flags);
+    const esc=list.map(s=>(typeof s==='object'?(s.text||''):s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+    try{ __kwRegexCache=new RegExp('(' + esc.join('|') + ')','gi'); __kwRegexKey=key; return __kwRegexCache; }catch{ __kwRegexCache=null; __kwRegexKey=''; return null; }
   };
+  let __capsExclCache = null, __capsExclKey = '';
   const buildCapsExcludeRegex = ()=>{
     const list=(settings.textFormatting.capsExclusions||[]).filter(Boolean);
-    if (!list.length) return null;
+    if (!list.length){ __capsExclCache=null; __capsExclKey=''; return null; }
+    const key=list.join('|');
+    if (key===__capsExclKey && __capsExclCache) return new RegExp(__capsExclCache.source, __capsExclCache.flags);
     const esc=list.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
-    try{ return new RegExp('(^|[^A-Za-z])(' + esc.join('|') + ')(?=$|[^A-Za-z])','g'); }catch{ return null; }
+    try{ __capsExclCache=new RegExp('(^|[^A-Za-z])(' + esc.join('|') + ')(?=$|[^A-Za-z])','g'); __capsExclKey=key; return __capsExclCache; }catch{ __capsExclCache=null; __capsExclKey=''; return null; }
   };
   // Remove existing ALL CAPS spans that now match an exclusion
   const unwrapExcludedAllCaps = ()=>{
@@ -837,7 +879,8 @@
               }
             }
             const cls = 'aidt-keyword' + ((kw.effect && kw.effect!=='None')?(' aidt-eff-'+kw.effect):'');
-            const colorStyle = (kw.color && typeof kw.color==='string' && kw.color!=='') ? ('color:'+kw.color+';') : '';
+            const validColor = (c)=>{ try{ return typeof c==='string' && c!=='' && /^(#[0-9a-f]{3,8}|rgba?\([\d\s,.%]+\)|hsla?\([\d\s,.%deg]+\)|[a-z]{3,20})$/i.test(c.trim()); }catch(_){ return false; } };
+            const colorStyle = (kw.color && validColor(kw.color)) ? ('color:'+kw.color.trim()+';') : '';
             const style = (kw.bold ? 'font-weight:700;' : '') + colorStyle;
             acc = acc.replace(re, (m, pre, hit)=>{
               const span=document.createElement('span');
@@ -958,15 +1001,14 @@
             }catch{ return NodeFilter.FILTER_REJECT; }
         }}, false);
 
-      const targets=[];
-      for (let n=walker.nextNode(); n; n=walker.nextNode()) targets.push(n);
-
-      for (const tn of targets){
-        const raw=String(tn.nodeValue||'');
-        const html=transformString(raw);
-        if (html!==raw){
-          const span=document.createElement('span'); span.innerHTML=html;
-          tn.replaceWith(span);
+      // Instead of per-text-node replacement (which breaks React via patched DOM methods),
+      // transform the entire root's text content at once via innerHTML.
+      const rootText = txt(root) || '';
+      if (rootText){
+        const baseText = getBaselineTextFor(root, rootText);
+        const html = transformString(baseText);
+        if (html && html !== baseText){
+          AIDT_replaceHTML(root, html);
         }
       }
     }
@@ -977,11 +1019,11 @@
   const reparseNow = ()=>parseRootsDeep();
 
   // Parse only the latest output container (fast path for newest paragraph)
-  const LATEST_SELECTORS = '#gameplay-output #do-not-copy, #do-not-copy, #gameplay-output #transition-opacity, #gameplay-output span._blw-0hover-0px, span._blw-0hover-0px, #transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], [data-testid="story-container"], span.font_heading, span.font_gameplay, p.font_gameplay, div.font_gameplay, .w_comment, .w-comment, .w_run, .w-run';
+  const LATEST_SELECTORS = '#gameplay-output #transition-opacity, #gameplay-output span._blw-0hover-0px, span._blw-0hover-0px, #transition-opacity, span.font_heading, span.font_gameplaySans, p.font_gameplaySans, div.font_gameplaySans';
   const OVERLAY_SELECTOR = '#gameplay-output #transition-opacity, #transition-opacity';
   const isPageReady = ()=>{
     try{
-      const root=document.getElementById('gameplay-output') || document.querySelector('[data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      const root=document.getElementById('gameplay-output') || document.querySelector('[role="article"][aria-label="Story"]');
       return !!root;
     }catch(_){ return false; }
   };
@@ -993,43 +1035,7 @@
       return (nodes && nodes.length) ? nodes[nodes.length-1] : null;
     }catch(_){ return null; }
   }
-  function syncOverlayFromCopy(){
-    try{
-      // Skip only when the OUTPUT paragraph itself is being edited, not when the input box is present
-      try{
-        var isEditingOutput = (function(){
-          try{
-            var ed = document.querySelector('[contenteditable="true"]');
-            if (!ed || !ed.closest) return false;
-            return !!ed.closest('#gameplay-output');
-          }catch(_){ return false; }
-        })();
-        if (isEditingOutput) return;
-      }catch(_){ }
-      const overlays = Array.prototype.slice.call(document.querySelectorAll(OVERLAY_SELECTOR));
-      if (!overlays || !overlays.length) return;
-      overlays.forEach(function(overlay){
-        try{
-          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) return;
-          const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
-          const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
-          const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
-          const text = getBaselineTextFor(source, txt(source) || '');
-          if (!text) return;
-          let html = transformString(applyParagraphsToText(text)) || '';
-          try{ html = applyParagraphsToHTML(html); }catch(_){ }
-          if (html && overlay.innerHTML !== html){
-            AIDT_replaceHTML(overlay, html);
-            try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
-          }
-        }catch(_each){ }
-      });
-    }catch(_){ }
-  }
-
-  // If only a tiny part of quotes is detected as speech (due to split-word spans),
-  // rebuild the entire paragraph HTML from textContent using our transformer.
+  // Rebuild the entire paragraph HTML from textContent using our transformer.
   function retransformFromTextContent(el){
     try{
       if (!el) return;
@@ -1044,120 +1050,6 @@
       }
     }catch(_){ }
   }
-  // Rebuild the split-word overlay row (transition-opacity / game-backdrop-saturate)
-  // directly from its own text so the newest paragraph shows AIDT spans immediately.
-  const OVERLAY_WRAP_SAFE = true; // Only disable wrapping/reparenting; allow full overlay rebuild
-  const OVERLAY_MUTATION_SAFE = true; // Disable innerHTML mutations in Next-managed overlay to avoid removeChild errors
-  function rebuildOverlayFromOwnText(container){
-    try{
-      if (OVERLAY_MUTATION_SAFE) return;
-      if (!container) return;
-      const isOverlayRow = (container.id && container.id==='transition-opacity') ||
-                           (container.querySelector && container.querySelector('#game-backdrop-saturate'));
-      if (!isOverlayRow) return;
-      // Do NOT rebuild action rows (they contain an #action-icon and special markup)
-      try{ if (container.querySelector && container.querySelector('#action-icon')) return; }catch(_){ }
-      const raw = getBaselineTextFor(container, txt(container) || '');
-      if (!raw) return;
-      let html = transformString(applyParagraphsToText(raw)) || '';
-      try{ html = applyParagraphsToHTML(html); }catch(_){ }
-      if (html && container.innerHTML !== html){
-        AIDT_replaceHTML(container, html);
-        try{ applyInlineSpanStyles(); }catch(_){ }
-        try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
-        dbg('rebuildOverlayFromOwnText: overlay rebuilt from its own text');
-      }
-    }catch(_){ }
-  }
-  // Overlay speech wrapper: scan per-word '#game-backdrop-saturate' spans and wrap
-  // ranges between quote characters into a parent '.aidt-speech' span so coloring
-  // applies without changing the tokenization.
-  function overlayWrapSpeech(container){
-    try{
-      if (OVERLAY_WRAP_SAFE) return; // avoid moving tokens inside React tree
-      if (!container) return;
-      const hasOverlay = (container.id && container.id==='transition-opacity') ||
-                         (container.querySelector && container.querySelector('#game-backdrop-saturate'));
-      if (!hasOverlay) return;
-      // Avoid duplicating wrappers on repeated passes
-      try{ container.querySelectorAll('.aidt-speech').forEach(n=>{ try{
-        // If the wrapper only contains overlay tokens, unwrap it first
-        const tokens = n.querySelectorAll('#game-backdrop-saturate');
-        if (tokens && tokens.length){ while(n.firstChild) n.parentNode.insertBefore(n.firstChild, n); n.remove(); }
-      }catch(_){ } }); }catch(_){ }
-
-      const tokens = Array.from(container.querySelectorAll('#game-backdrop-saturate'));
-      if (!tokens.length) return;
-      // Build a map of quote positions across tokens
-      const quotePositions = [];
-      let prevLastChar = '';
-      for (let i=0;i<tokens.length;i++){
-        const t = tokens[i].textContent || '';
-        for (let c=0;c<t.length;c++){
-          const ch = t[c];
-          if (ch === '"'){
-            const prevChar = (c>0) ? t[c-1] : prevLastChar;
-            // Ignore numeric inch quotes like 5'8" or 3" screws
-            if (prevChar && /[0-9]/.test(prevChar)) { continue; }
-            quotePositions.push({token:i, offset:c});
-          }
-        }
-        prevLastChar = t ? t[t.length-1] : '';
-      }
-      if (quotePositions.length < 2) return;
-      // Pair quotes in order: (0,1), (2,3), ...
-      for (let p=0; p+1<quotePositions.length; p+=2){
-        const a = quotePositions[p].token;
-        const b = quotePositions[p+1].token;
-        // Always wrap the inclusive range [a..b] — short utterances like "No." are valid speech
-        // Wrap inclusive range [a..b]
-        try{
-          const wrapper = document.createElement('span');
-          wrapper.className = 'aidt aidt-speech';
-          // Insert before first token
-          const first = tokens[a];
-          if (!first || !first.parentNode) continue;
-          first.parentNode.insertBefore(wrapper, first);
-          for (let k=a;k<=b;k++){
-            if (!tokens[k]) continue;
-            wrapper.appendChild(tokens[k]);
-          }
-        }catch(_){ }
-      }
-      try{ applyInlineSpanStyles(); }catch(_){ }
-    }catch(_){ }
-  }
-  // Debounced, re-entrancy guarded overlay normalizer/wrapper to avoid observer loops
-  function ensureOverlayWrappedOnce(root){
-    try{
-      if (window.__AIDT_OVERLAY_WRAP_SCHEDULED__) return;
-      window.__AIDT_OVERLAY_WRAP_SCHEDULED__ = true;
-      setTimeout(function(){
-        try{
-          window.__AIDT_OVERLAY_WRAP_SCHEDULED__ = false;
-          var ol = ql('#gameplay-output #transition-opacity, #transition-opacity', root) || ql('#transition-opacity');
-          if (!ol) return;
-          // Skip action rows; only apply speech wrapping + styles on them
-          try{
-            if (ol.querySelector && ol.querySelector('#action-icon')){
-              try{ overlayWrapSpeech(ol); }catch(_ow1){}
-              try{ applyInlineSpanStyles(); }catch(_as1){}
-              return;
-            }
-          }catch(_sk){}
-          if (window.__AIDT_OVERLAY_LOCK__) return; // prevent re-entry
-          window.__AIDT_OVERLAY_LOCK__ = true;
-          try{ normalizeOverlay(); }catch(_no){}
-          try{ overlayWrapSpeech(ol); }catch(_ow){}
-          try{ applyInlineSpanStyles(); }catch(_as){}
-        }catch(_){
-        }finally{
-          try{ window.__AIDT_OVERLAY_LOCK__ = false; }catch(_f){}
-        }
-      }, 50);
-    }catch(_){ }
-  }
-
   // Rebuild visible paragraphs from plain text so caps/keyword rules re-evaluate instantly
   function rebuildVisibleParagraphs(){
     try{
@@ -1166,68 +1058,22 @@
       if (!nodes || !nodes.length) return;
       nodes.forEach(n=>{
         try{
-          const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
-          if (isOverlayRow){
-            try{ rebuildOverlayFromOwnText(n); }catch(_ro){}
-            try{ overlayWrapSpeech(n); }catch(_ow){}
-            try{ applyInlineSpanStyles(); }catch(_as){}
-            return;
-          }
           const t=pickTextElement(n); if(!t) return; const raw=txt(t)||''; if(!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); applyInlineSpanStyles(); }
         }catch(_){ }
       });
     }catch(_){ }
   }
-  // Stronger overlay normalizer: rebuild overlay from the plain text of the copy container
-  function normalizeOverlay(){
-    try{
-      try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
-      if (OVERLAY_MUTATION_SAFE) return;
-      // Skip only while editing the output paragraph itself
-      try{
-        var isEditingOutput = (function(){
-          try{
-            var ed = document.querySelector('[contenteditable="true"]');
-            if (!ed || !ed.closest) return false;
-            // Skip normalization if the active editor is within gameplay output or overlay containers
-            return !!(ed.closest('#gameplay-output') || ed.closest('#transition-opacity'));
-          }catch(_){ return false; }
-        })();
-        if (isEditingOutput) return;
-      }catch(_){ }
-      const overlays = Array.prototype.slice.call(document.querySelectorAll(OVERLAY_SELECTOR));
-      if (!overlays || !overlays.length) return;
-      overlays.forEach(function(overlay){
-        try{
-          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) return;
-          const localCopy = overlay && overlay.parentNode ? ql('#do-not-copy', overlay.parentNode) : null;
-          const copy = localCopy || ql('#gameplay-output #do-not-copy, #do-not-copy');
-          const source = (function(){ try{ const el=copy? (pickTextElement(copy)||copy):overlay; return el; }catch(_){ return overlay; } })();
-          const text = getBaselineTextFor(source, txt(source) || '');
-          if (!text) return;
-          let html = transformString(applyParagraphsToText(text)) || '';
-          try{ html = applyParagraphsToHTML(html); }catch(_){ }
-          if (html && overlay.innerHTML !== html){
-            AIDT_replaceHTML(overlay, html);
-            try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
-          }
-        }catch(_each){ }
-      });
-    }catch(_){ }
-  }
-
   function setupOverlayObserver(){
     try{
       const root = document.getElementById('gameplay-output') || document.body;
       if (!root) return;
-      const rebalance = debounce(()=>{ try{ if (window.AIDT_isPaused && window.AIDT_isPaused()) return; if (window.__AIDT_PAUSE__) return; bulkNormalizeOverlays(); }catch(_){ } }, 120);
+      const reformat = debounce(()=>{ try{ if (window.AIDT_isPaused && window.AIDT_isPaused()) return; if (window.__AIDT_PAUSE__) return; ensureLatestFormatted(); }catch(_){ } }, 120);
       if (window.__AIDT_OVERLAY_OBSERVER__) return;
       const mo = createAidtObserver(function(muts){
         try{
           for (var i=0;i<muts.length;i++){
             var m=muts[i];
-            if (m.type==='childList' || m.type==='characterData'){ rebalance(); break; }
+            if (m.type==='childList' || m.type==='characterData'){ reformat(); break; }
           }
         }catch(_){ }
       });
@@ -1236,50 +1082,13 @@
       try{ window.__AIDT_OVERLAY_OBSERVER__ = mo; }catch(_){ }
     }catch(_){ }
   }
-  // Normalize all overlay rows at once (play.aidungeon multiple paragraphs)
-  function bulkNormalizeOverlays(){
-    try{
-      try{ if ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__) return; }catch(_){ }
-      try{ window.AIDT_pause && window.AIDT_pause(); window.__AIDT_PAUSE__ = true; }catch(_){ }
-      // Temporarily disconnect observer to avoid loops
-      try{ if (window.__AIDT_OVERLAY_OBSERVER__) window.__AIDT_OVERLAY_OBSERVER__.disconnect(); }catch(_){ }
-      const list = document.querySelectorAll(OVERLAY_SELECTOR);
-      const nearestCopyFor = (overlay)=>{
-        try{
-          let n = overlay.previousElementSibling;
-          while(n){ if (n.id==='do-not-copy') return n; n=n.previousElementSibling; }
-          n = overlay.nextElementSibling;
-          while(n){ if (n.id==='do-not-copy') return n; n=n.nextElementSibling; }
-          const scope = (overlay.parentNode && overlay.parentNode.querySelector) ? overlay.parentNode : document;
-          const local = scope.querySelector('#do-not-copy'); if (local) return local;
-        }catch(_){ }
-        return document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
-      };
-      for (let i=0;i<list.length;i++){
-        const overlay = list[i];
-        try{
-          if (!overlay || (overlay.querySelector && overlay.querySelector('#action-icon'))) continue;
-          const localCopy = nearestCopyFor(overlay);
-          const source = (function(){ try{ const el=localCopy? (pickTextElement(localCopy)||localCopy):overlay; return el; }catch(_){ return overlay; } })();
-          let text = getBaselineTextFor(source, txt(source)||'');
-          if (!text){ text = getBaselineTextFor(overlay, txt(overlay)||''); }
-          if (!text) continue;
-          let html = transformString(applyParagraphsToText(text)) || '';
-          try{ html = applyParagraphsToHTML(html); }catch(_){ }
-          if (html && overlay.innerHTML !== html){
-            overlay.innerHTML = html;
-            try{ applyInlineSpanStyles(); }catch(_){ }
-            try{ if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} }catch(_){ }
-          }
-        }catch(_){ }
-      }
-      // Re-attach observer after batch
-      try{ setupOverlayObserver(); }catch(_){ }
-      try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(__){} }
-    }catch(_){ }
-  }
   const parseWithinRoot = (root, force)=>{
     if (!settings.enabled || !root || isDanger(root)) return;
+    // Skip action rows — they are styled uniformly by AIDT_applySayDo, not per-quote
+    try{ if (root.querySelector && root.querySelector('#action-icon')) return; }catch(_){ }
+    try{ if (root.closest && root.closest('div#transition-opacity') && root.closest('div#transition-opacity').querySelector('#action-icon')) return; }catch(_){ }
+    // Skip if already contains our formatted spans (prevents duplication from multiple passes)
+    try{ if (root.querySelector && root.querySelector('.aidt')) return; }catch(_){ }
     try{ if (!force && ((window.AIDT_isPaused && window.AIDT_isPaused()) || window.__AIDT_PAUSE__)) return; }catch(_){ }
     // Do not parse inside a live contenteditable to preserve editing interactions
     try{ if (!force && isWithinEditable(root)) return; }catch(_){ }
@@ -1287,60 +1096,54 @@
     const capsEnabled=!!(settings.allCapsEffect && settings.allCapsEffect!=='None');
     const subtree = txt(root);
     if (!force && !kwEnabled && !(MARKER_RE.test(subtree) || (capsEnabled && CAPS_MARKER_RE.test(subtree)))) return;
-    const walker=document.createTreeWalker(
-      root, NodeFilter.SHOW_TEXT,
-      { acceptNode(node){
-          try{
-            const p=node.parentNode; if(!p) return NodeFilter.FILTER_REJECT;
-            if (p.closest('input,textarea,script,style,template,code,pre')) return NodeFilter.FILTER_REJECT;
-            if (p.closest('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
-            if (p.closest('.aidt')) return NodeFilter.FILTER_REJECT;
-            if (hasScript(p)) return NodeFilter.FILTER_REJECT;
-            // Allow formatting even when nodes are contenteditable; we still exclude inputs/textarea above
-            const t=node.nodeValue||''; if(!/\S/.test(t)) return NodeFilter.FILTER_REJECT;
-            if (t.length>4000) return NodeFilter.FILTER_REJECT;
-            if (!force && !kwEnabled && !(MARKER_RE.test(t) || (capsEnabled && CAPS_MARKER_RE.test(t)))) return NodeFilter.FILTER_REJECT;
-            return NodeFilter.FILTER_ACCEPT;
-          }catch{ return NodeFilter.FILTER_REJECT; }
-      }}, false);
-    const targets=[]; for (let n=walker.nextNode(); n; n=walker.nextNode()) targets.push(n);
-    for (const tn of targets){
-      const raw=String(tn.nodeValue||'');
-      const html=transformString(raw);
-      if (html!==raw){ const span=document.createElement('span'); span.innerHTML=html; tn.replaceWith(span); }
+    // For parent containers with #transition-opacity children, recurse into each child
+    if (root.querySelector && root.querySelector('#transition-opacity')){
+      const children = Array.from(root.querySelectorAll('#transition-opacity'));
+      for (const child of children){ parseWithinRoot(child, force); }
+      return;
+    }
+    // For leaf elements: find the innermost text-bearing element.
+    // The site wraps text in a child <span> inside #transition-opacity — target THAT span
+    // so we don't destroy React's wrapper structure.
+    let target = root;
+    try{
+      if (root.children && root.children.length === 1 && root.children[0].tagName === 'SPAN' && !root.children[0].id){
+        target = root.children[0]; // Use the inner span, not the outer #transition-opacity
+      }
+    }catch(_){}
+    const rootText = txt(target) || '';
+    if (!rootText) return;
+    const baseText = getBaselineTextFor(target, rootText);
+    let html = transformString(baseText);
+    if (html && html !== baseText){
+      AIDT_replaceHTML(target, html);
     }
   };
-  // Prefer visible gameplay text elements, not inside copy-overlay containers
+  // Prefer visible gameplay text elements
   function pickTextElement(container){
     try{
       if (__AIDT_PICK_CACHE && __AIDT_PICK_CACHE.has(container)) return __AIDT_PICK_CACHE.get(container);
-      // If the given container is the highlight/saturate overlay (split into per-word spans),
-      // prefer the hidden copy container which holds full paragraph HTML.
+      // If container is an action row, return the action text span
       try{
-        if (container && (
-          (container.id && container.id==='transition-opacity') ||
-          (container.querySelector && container.querySelector('#game-backdrop-saturate'))
-        )){
-          let alt=null;
-          try{
-            const scope = (container.parentNode && container.parentNode.querySelector) ? container.parentNode : document;
-            const localCopy = scope.querySelector('#do-not-copy');
-            if (localCopy){ alt = localCopy.querySelector('span.font_gameplay, p.font_gameplay, div.font_gameplay'); }
-          }catch(_){ }
-          if (!alt){ alt = document.querySelector('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay'); }
-          if (alt){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, alt); return alt; }
-          // Fallback: use the copy container itself if a specific child wasn't found
-          const copy = (container.parentNode && container.parentNode.querySelector) ? (container.parentNode.querySelector('#do-not-copy') || document.querySelector('#gameplay-output #do-not-copy, #do-not-copy')) : document.querySelector('#gameplay-output #do-not-copy, #do-not-copy');
-          // If copy container is currently being edited, return it directly (avoid replacing HTML while typing)
-          try{ if (copy && copy.querySelector && copy.querySelector('[contenteditable="true"]')) return copy; }catch(_){ }
-          if (copy){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, copy); return copy; }
+        if (container && container.querySelector && container.querySelector('#action-icon')){
+          const actionText = container.querySelector('.font_gameplaySans');
+          if (actionText){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, actionText); return actionText; }
         }
       }catch(_){ }
-      const candidates = container.querySelectorAll('span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      // If container is a story section (SPAN.font_heading), return last child paragraph
+      try{
+        if (container && container.classList && container.classList.contains('font_heading')){
+          const children = container.querySelectorAll('#transition-opacity');
+          if (children && children.length){
+            const last = children[children.length-1];
+            if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, last);
+            return last;
+          }
+        }
+      }catch(_){ }
+      const candidates = container.querySelectorAll('span.font_gameplaySans, p.font_gameplaySans, div.font_gameplaySans, span.font_heading');
       for (let i=0;i<candidates.length;i++){
         const el=candidates[i];
-        // Skip split-word overlay nodes
-        if (el.querySelector && el.querySelector('#game-backdrop-saturate')) continue;
         // Prefer non-editable nodes for formatting; if editable, skip
         try{ if (el.closest && el.closest('[contenteditable="true"]')) continue; }catch(_){ }
         if (el.closest && !el.hasAttribute('aria-hidden')){ if (__AIDT_PICK_CACHE) __AIDT_PICK_CACHE.set(container, el); return el; }
@@ -1351,9 +1154,8 @@
   // Fallback finder: last visible gameplay text element anywhere
   function findLatestTextEl(){
     try{
-      const nodes = document.querySelectorAll('#gameplay-output #do-not-copy span.font_gameplay, #do-not-copy span.font_gameplay, #do-not-copy p.font_gameplay, #do-not-copy div.font_gameplay, span.font_gameplay, p.font_gameplay, div.font_gameplay, span.font_heading, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+      const nodes = document.querySelectorAll('span.font_gameplaySans, p.font_gameplaySans, div.font_gameplaySans, span.font_heading');
       if (!nodes || !nodes.length) return null;
-      // choose the last node that is not aria-hidden and not inside copy overlay
       for (let i=nodes.length-1;i>=0;i--){
         const el = nodes[i];
         if (el && (!el.hasAttribute('aria-hidden'))) return el;
@@ -1419,15 +1221,13 @@
       // If user is actively editing, avoid re-rendering the newest paragraph to preserve caret/clicks
       try{ if (isEditingActive()) return; }catch(_){ }
       // Prefer the LAST overlay row on the page, as beta renders multiple '#transition-opacity' entries
-      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
-                      document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
-                      document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
+      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })();
       dbg('parseLatestOutput: preferred=', !!preferred);
       if (preferred){
-        // First, run the normal node-by-node transform
+        // First, run the normal node-by-node transform on the text element (not the container, to avoid duplication)
+        const _textTarget = pickTextElement(preferred) || preferred;
         dbg('parseLatestOutput: running parseWithinRoot on preferred');
-        parseWithinRoot(preferred, true);
-        try{ rebuildOverlayFromOwnText(preferred); overlayWrapSpeech(preferred); }catch(_){ }
+        parseWithinRoot(_textTarget, true);
         // Ensure styles apply immediately on the newest paragraph
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline'); }catch(_e){}
         try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do'); } }catch(_e){}
@@ -1458,8 +1258,7 @@
           const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!textEl.querySelector('.aidt-im');
           if (speechHidden || imHidden) retransformFromTextContent(textEl);
         }catch(_){ }
-        try{ syncOverlayFromCopy(); ensureOverlayWrappedOnce(preferred); }catch(_){ }
-        return;
+          return;
       }
       const els=document.querySelectorAll(LATEST_SELECTORS);
       dbg('parseLatestOutput: found els count=', (els&&els.length)||0);
@@ -1486,7 +1285,6 @@
       const latest=els[els.length-1];
       dbg('parseLatestOutput: running parseWithinRoot on latest');
       try{ if (!isEditingActive()) parseWithinRoot(latest, true); }catch(_){ }
-      try{ rebuildOverlayFromOwnText(latest); overlayWrapSpeech(latest); ensureOverlayWrappedOnce(latest); }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('parseLatestOutput: applied fonts/base/inline (no preferred)'); }catch(_e){}
       try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); dbg('parseLatestOutput: applied Say/Do (no preferred)'); } }catch(_e){}
       try{
@@ -1510,38 +1308,63 @@
       try{
         const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
         const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
-        if (speechHidden || imHidden){ retransformFromTextContent(textEl); try{ ensureOverlayWrappedOnce(); }catch(_){ } }
+        if (speechHidden || imHidden) retransformFromTextContent(textEl);
       }catch(_){ }
-      try{ syncOverlayFromCopy(); normalizeOverlay(); }catch(_){ }
     }catch{}
   };
   // Strong finalizer for newest paragraph: combines parsing + inline transform
+  let __ensureLastLen = 0, __ensureLastEl = null;
+  let __ensureTimer = null;
   function ensureLatestFormatted(){
+    // Debounce: wait for text to stop changing (streaming detection)
+    try{
+      const go = document.getElementById('gameplay-output');
+      if (go){
+        const lastSpan = go.querySelector('#transition-opacity:last-child') ||
+                         (function(){ const list=go.querySelectorAll('#transition-opacity'); return list.length?list[list.length-1]:null; })();
+        if (lastSpan){
+          const newLen = (lastSpan.textContent||'').length;
+          if (newLen > 0 && __ensureLastEl === lastSpan && newLen !== __ensureLastLen){
+            // Text is still changing (streaming) — defer formatting
+            __ensureLastLen = newLen;
+            if (__ensureTimer) clearTimeout(__ensureTimer);
+            __ensureTimer = setTimeout(()=>{ __ensureTimer=null; ensureLatestFormattedInner(); }, 400);
+            return;
+          }
+          __ensureLastLen = newLen;
+          __ensureLastEl = lastSpan;
+        }
+      }
+    }catch(_){}
+    ensureLatestFormattedInner();
+  }
+  function ensureLatestFormattedInner(){
     try{
       if (!isPageReady()) return;
       try{ if (window.__AIDT_PAUSE__) return; }catch(_){ }
       try{ if (isEditingActive()) return; }catch(_){ }
       // Prefer the LAST overlay row on the page
-      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
-                      document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
-                      document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
+      let preferred = (function(){ try{ const list=document.querySelectorAll('#gameplay-output #transition-opacity, #transition-opacity'); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })();
       const container = preferred || null;
-      // If container is the overlay, rebuild it from its own text first, then pick a text element
-      if (container && ((container.id && container.id==='transition-opacity') || (container.querySelector && container.querySelector('#game-backdrop-saturate')))){
-        try{ rebuildOverlayFromOwnText(container); overlayWrapSpeech(container); }catch(_){ }
-      }
       const textEl = container ? pickTextElement(container) : (findLatestTextEl() || null);
       dbg('ensureLatestFormatted: preferred=', !!preferred, preferred ? preferred.id||preferred.tagName : null, 'textEl=', !!textEl);
       __aidt_debugDumpLatest(container || textEl, textEl);
       if (!textEl) return;
-      try{ parseWithinRoot(container || textEl, true); dbg('ensureLatestFormatted: parseWithinRoot ok'); }catch(_e0){ dbgw('ensureLatestFormatted: parseWithinRoot error', _e0); }
-      // Guarantee inline spans exist on the newest element immediately
+      // Skip if this element was already formatted with the same content length (prevents re-processing during streaming)
+      const curLen = (textEl.textContent||'').length;
+      if (textEl === __ensureLastEl && curLen === __ensureLastLen && textEl.querySelector && textEl.querySelector('.aidt')) return;
+      __ensureLastEl = textEl; __ensureLastLen = curLen;
+      // Use textEl consistently for both parsing and replacement to avoid duplication
+      try{ parseWithinRoot(textEl, true); dbg('ensureLatestFormatted: parseWithinRoot ok'); }catch(_e0){ dbgw('ensureLatestFormatted: parseWithinRoot error', _e0); }
+      // Guarantee inline spans exist on the newest element immediately (only if parseWithinRoot didn't already add them)
       try{
-        const rawNow = txt(textEl)||'';
-        if (rawNow && !(textEl.innerHTML||'').match(/class=\"aidt/)){
-          let htmlNow = transformString(applyParagraphsToText(rawNow)) || '';
-          try{ htmlNow = applyParagraphsToHTML(htmlNow); }catch(_){ }
-          if (htmlNow && htmlNow !== rawNow){ AIDT_replaceHTML(textEl, htmlNow); }
+        if (!(textEl.innerHTML||'').match(/class=\"aidt/)){
+          const rawNow = txt(textEl)||'';
+          if (rawNow){
+            let htmlNow = transformString(applyParagraphsToText(rawNow)) || '';
+            try{ htmlNow = applyParagraphsToHTML(htmlNow); }catch(_){ }
+            if (htmlNow && htmlNow !== rawNow){ AIDT_replaceHTML(textEl, htmlNow); }
+          }
         }
       }catch(_){ }
       try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); dbg('ensureLatestFormatted: styles applied'); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document); dbg('ensureLatestFormatted: Say/Do applied'); } }catch(_e1){ dbgw('ensureLatestFormatted: style error', _e1); }
@@ -1556,7 +1379,6 @@
           if (html && html !== t){ AIDT_replaceHTML(textEl, html); applyInlineSpanStyles(); dbg('ensureLatestFormatted: injected html'); }
         }
         __aidt_debugMarkLatest(container || textEl, textEl);
-        syncOverlayFromCopy();
         try{
           const speechHidden = !hasVisibleDesc(textEl,'.aidt-speech') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-speech'));
           const imHidden = !hasVisibleDesc(textEl,'.aidt-im') && !!(textEl && textEl.querySelector && textEl.querySelector('.aidt-im'));
@@ -1577,9 +1399,7 @@
         const nodes = preferred.querySelectorAll(LATEST_SELECTORS);
         nodes.forEach(n=>{
           try{
-            const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
-            if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
-            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
+            const t=pickTextElement(n); if (!t) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
           }catch(_){ }
         });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
@@ -1588,15 +1408,12 @@
         const nodes = document.querySelectorAll(LATEST_SELECTORS);
         nodes.forEach(n=>{
           try{
-            const isOverlayRow = (n && ((n.id && n.id==='transition-opacity') || (n.querySelector && n.querySelector('#game-backdrop-saturate'))));
-            if (isOverlayRow){ try{ rebuildOverlayFromOwnText(n); }catch(_){ } try{ overlayWrapSpeech(n); }catch(_){ } return; }
-            const t=pickTextElement(n); if (!t) return; if (t.id==='transition-opacity' || (t.closest && t.closest('#transition-opacity'))) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
+            const t=pickTextElement(n); if (!t) return; const raw=txt(t)||''; if (!raw) return; const textP=applyParagraphsToText(getBaselineTextFor(t, raw)); const html=transformString(textP); if (html && html!==raw){ AIDT_replaceHTML(t, html); }
           }catch(_){ }
         });
         try{ applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
         try{ if (window.__AIDT_HAS_SAYDO__) { AIDT_applySayDo(document); } }catch(_e){}
       }
-      try{ bulkNormalizeOverlays(); }catch(_){ }
       try{ setTimeout(()=>{ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(_){ } }, 20); }catch(_){ try{ window.__AIDT_PAUSE__ = false; window.AIDT_resume && window.AIDT_resume(); }catch(__){} }
     }catch{}
   };
@@ -1608,10 +1425,9 @@
     const attachLatestObserver=()=>{
       try{
         // Prefer the LAST overlay row on the page
-        let preferred = (function(){ try{ const list=document.querySelectorAll(OVERLAY_SELECTOR); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })() ||
-                        document.querySelector('#gameplay-output #do-not-copy') || document.querySelector('#do-not-copy') ||
-                        document.querySelector('[data-testid="story-container"]') || document.querySelector('[data-testid="adventure-text"]') || document.querySelector('[data-testid="message-text"]') || document.querySelector('[data-testid="playback-content"]');
-        const candidate = preferred || (!isPageReady()? null : (document.querySelectorAll(LATEST_SELECTORS)||[])[(document.querySelectorAll(LATEST_SELECTORS)||[]).length-1]);
+        let preferred = (function(){ try{ const list=document.querySelectorAll(OVERLAY_SELECTOR); return (list&&list.length)? list[list.length-1] : null; }catch(_){ return null; } })();
+        const _latestNodes = !preferred && isPageReady() ? (document.querySelectorAll(LATEST_SELECTORS)||[]) : [];
+        const candidate = preferred || (_latestNodes.length ? _latestNodes[_latestNodes.length-1] : null);
         if (!candidate || candidate===latestTarget) return;
         if (latestMo) { try{ latestMo.disconnect(); }catch(_){}; latestMo=null; }
         latestTarget=candidate;
@@ -1707,7 +1523,6 @@
         // CSS variables for dynamic colors/weights (reduces per-element inline writes)
         ':root{--aidt-speech-color:#ffffff;--aidt-speech-weight:400;--aidt-say-color:var(--aidt-speech-color,#ffffff);--aidt-say-weight:var(--aidt-speech-weight,400);--aidt-im-color:#9ca3af;--aidt-im-weight:400;--aidt-it-color:#facc15;--aidt-it-weight:400}' +
         '.aidt-speech{color:var(--aidt-speech-color,#ffffff)!important;font-weight:var(--aidt-speech-weight,400)!important}' +
-        '.w_comment .aidt-speech, .w-comment .aidt-speech{color:var(--aidt-say-color,var(--aidt-speech-color,#ffffff))!important;font-weight:var(--aidt-say-weight,var(--aidt-speech-weight,400))!important}' +
         '.aidt-im, .ai-italic-speech, em.ai-italic-speech{color:var(--aidt-im-color,#9ca3af)!important;font-weight:var(--aidt-im-weight,400)!important}' +
         '.aidt-italic:not(.aidt-im){color:var(--aidt-it-color,#facc15)!important;font-weight:var(--aidt-it-weight,400)!important}' +
         '@media (prefers-reduced-motion: no-preference){' +
@@ -1871,7 +1686,7 @@
     const backdropVal = rgbHexToRgba(colour,o);
     // Apply-time sanitization
     const safeUrl = (s)=>{ try{ const u=new URL(s, location.href); return (u.protocol==='http:'||u.protocol==='https:') ? u.href : ''; }catch(_){ return ''; } };
-    const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (!/^(linear-gradient|radial-gradient|conic-gradient)\(/i.test(t)) return ''; if (/url\s*\(/i.test(t)) return ''; if (/var\s*\(/i.test(t)) return ''; return t; }catch(_){ return ''; } };
+    const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (!/^(linear-gradient|radial-gradient|conic-gradient)\(/i.test(t)) return ''; if (/\b(url|var|calc|attr|env|expression)\s*\(/i.test(t)) return ''; return t; }catch(_){ return ''; } };
     const gradSafe = safeGrad(gradient);
     const urlSafe  = safeUrl(imgUrl);
     const val= (type==='solid') ? solidVal : (type==='backdrop'?backdropVal:(type==='gradient'?gradSafe:(type==='image'?(urlSafe?('url("'+urlSafe+'")[cover]'):'') : '')));
@@ -1885,7 +1700,7 @@
         if (type==='image' && !!settings.bgImageInFront){
           // Global CSS will handle overlay clearing; apply image on the topmost overlay containers for front display
           if (sel==='#transition-opacity' || sel==='#gameplay-saturate'){
-            try{ el.style.setProperty('background-image', 'url("'+imgUrl+'")', 'important'); el.style.setProperty('background-size','cover','important'); el.style.setProperty('background-position','center center','important'); el.style.setProperty('background-repeat','no-repeat','important'); }catch(_){ }
+            try{ if(urlSafe){ el.style.setProperty('background-image', 'url("'+urlSafe+'")', 'important'); el.style.setProperty('background-size','cover','important'); el.style.setProperty('background-position','center center','important'); el.style.setProperty('background-repeat','no-repeat','important'); } }catch(_){ }
           } else {
             el.style.removeProperty('background'); el.style.removeProperty('background-color'); el.style.removeProperty('background-image');
           }
@@ -1996,7 +1811,7 @@
           if (type==='default') return;
           if (type==='image' && !(settings.bgImageUrl||'').trim()) return;
           const uiReady=document.readyState==='complete';
-          const hasTargets=!!document.querySelector('#gameplay-output, #do-not-copy, #transition-opacity, [data-testid="story-container"], [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"]');
+          const hasTargets=!!document.querySelector('#gameplay-output, #transition-opacity, [role="article"][aria-label="Story"]');
           if (uiReady && hasTargets){ applyBackground(); return; }
           // Retry with increasing delay up to 1s
           window.__AIDT_SCHED_BACKOFF__ = window.__AIDT_SCHED_BACKOFF__ || Object.create(null);
@@ -2114,7 +1929,7 @@
     }catch(_){ }
   }
 
-  // Update existing inline spans (Speech/IM) and apply SAY overrides inside w_comment
+  // Update existing inline spans (Speech/IM) and apply SAY overrides on action rows
   let __AIDT_INLINE_SCHED__ = false;
   const applyInlineSpanStyles = ()=>{
     if (__AIDT_INLINE_SCHED__) return;
@@ -2147,7 +1962,13 @@
       setIfChanged(root, '--aidt-say-color', spCol);
       setIfChanged(root, '--aidt-say-weight', (spW||'400'));
     }catch(_){ }
-    try{ document.querySelectorAll('.w_comment, .w-comment').forEach(c=>{ try{ c.style.setProperty('--aidt-say-color', sayCol, 'important'); c.style.setProperty('--aidt-say-weight', (sayW||'400'), 'important'); }catch(_c){} }); }catch(_){ }
+    // Apply say overrides on action rows identified by #action-icon text
+    try{ document.querySelectorAll('div#transition-opacity').forEach(row=>{ try{
+      const icon = row.querySelector('#action-icon');
+      if (!icon) return;
+      const t = (icon.textContent||'').trim();
+      if (t === 'w_comment'){ row.style.setProperty('--aidt-say-color', sayCol, 'important'); row.style.setProperty('--aidt-say-weight', (sayW||'400'), 'important'); }
+    }catch(_c){} }); }catch(_){ }
 
     const imCol = settings.internalMonologue.colour || '#9ca3af';
     const imW   = settings.internalMonologue.bold ? '700' : '';
@@ -2596,6 +2417,7 @@
       '</section>'+
       '<section id="aidt-section-misc" class="section" data-section="misc" role="tabpanel" aria-labelledby="aidt-tab-misc">'+
         '<div class="group"><h4>'+T('Background')+'</h4><div class="row"><span>'+T('Background type')+'</span><select id="dd-bg-type"><option value="default">'+T('Default')+'</option><option value="backdrop">'+T('Backdrop (behind overlays)')+'</option><option value="solid">'+T('Solid (override overlays)')+'</option><option value="gradient">Gradient</option><option value="image">'+T('Custom image URL')+'</option></select><button id="rst-bg-type" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Background colour')+'</span><input id="sel-bg-colour" type="color"/><button id="rst-bg-colour" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row"><span>'+T('Backdrop opacity')+'</span><input id="rng-bg-opacity" type="range" min="0" max="100" step="1"/><button id="rst-bg-opacity" class="reset" title="'+T('Reset')+'">↺</button></div><div class="row" id="row-bg-gradient" style="display:none"><span>'+T('Gradient')+'</span><input id="tf-bg-gradient" type="text" placeholder="linear-gradient(180deg,#0b1220,#0a1423)"/><span></span></div><div class="row" id="row-bg-image" style="display:none"><span>'+T('Image URL')+'</span><input id="tf-bg-image" type="text" placeholder="https://..."/><span></span></div><div class="row" id="row-bg-image-opts" style="display:none"><span>'+T('Image Options')+'</span><div class="imgopt-grid"><div class="cell"><span class="lbl">'+T('Size')+'</span><select id="dd-bg-size"><option value="cover">cover</option><option value="contain">contain</option><option value="auto">auto</option></select></div><div class="cell"><span class="lbl">'+T('Position')+'</span><select id="dd-bg-pos"><option value="center center">center</option><option value="top center">top</option><option value="bottom center">bottom</option></select></div><div class="cell"><span class="lbl">'+T('Repeat')+'</span><select id="dd-bg-repeat"><option value="no-repeat">no-repeat</option><option value="repeat">repeat</option><option value="repeat-x">repeat-x</option><option value="repeat-y">repeat-y</option></select></div><div class="cell"><span class="lbl">'+T('Attachment')+'</span><select id="dd-bg-attach"><option value="scroll">scroll</option><option value="fixed">fixed</option></select></div></div></div><div class="actions"><button id="rst-bg-group" class="ghost">'+T('Restore Defaults')+'</button></div></div>'+
+        '<div class="group"><h4>'+T('Navigation')+'</h4><div class="row"><span>'+T('Auto-click “Claim Reward” button on load')+'</span><div id="sw-auto-claim" class="switch"><div class="knob"></div></div><span></span></div></div>'+
         '<div class="group"><h4>'+T('Theme Presets')+'</h4><div class="row"><span>'+T('Preset')+'</span><select id="dd-theme"><option value="">'+T('Select…')+'</option><option>Default</option><option>Noir</option><option>Paperback</option><option>Neon</option><option>Solarized Dark</option></select><button id="btn-apply-theme" class="ghost" title="'+T('Apply')+'">'+T('Apply')+'</button></div></div>'+
         ''+
         '<div class="group"><h4>'+T('Language')+'</h4><div class="row"><span>'+T('Language override')+'</span><select id="dd-lang"><option value="default">'+T('Default')+'</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="es">Español</option><option value="it">Italiano</option><option value="pt-BR">Português (Brasil)</option><option value="pt">Português</option><option value="tr">Türkçe</option><option value="pl">Polski</option><option value="ru">Русский</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh-CN">简体中文</option><option value="zh">中文</option><option value="ar">العربية</option><option value="hi">हिन्दी</option><option value="id">Bahasa Indonesia</option></select><span></span></div></div>'+
@@ -2853,6 +2675,32 @@
       setTimeout(mountNavBtn, 200);
       setTimeout(mountNavBtn, 800);
       setTimeout(mountNavBtn, 2000);
+      // If auto-click is enabled, reattempt clicking when navbar re-renders (React)
+      try{
+        if (settings.autoClickNav){
+          let clickedOnce=false;
+          const tryClick=()=>{
+            if (clickedOnce) return;
+            try{
+              const row = (function(){
+                let blur=null; try{ blur=document.querySelector('#game-blur-button')||null; }catch(_){ }
+                return (blur && blur.parentElement) ? blur.parentElement : document.querySelector('div._h-t-size-barH1917692045');
+              })();
+              let target=null;
+              if (row){ try{ target=row.querySelector(':scope > *:first-child button, :scope > *:first-child [role="button"], :scope > *:first-child a'); }catch(_){ } }
+              if (!target){ try{ target=document.querySelector('div._btc-0active-transparent:nth-child(1)'); }catch(_e){}
+                if (target && target.querySelector){ const inner=target.querySelector('button,[role="button"],a'); if(inner) target=inner; }
+              }
+              if (!target){ try{ target=document.evaluate('/html/body/div[1]/div/div/span/span/div[1]/div/div/div[3]/div/div[1]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; }catch(_e2){} }
+              if (target){
+                try{ target.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,composed:true})); }catch(_d){ try{ target.click && target.click(); }catch(__){} }
+                clickedOnce=true;
+              }
+            }catch(_c){}
+          };
+          [0,250,600,1200,2000,3500].forEach(ms=> setTimeout(tryClick, ms));
+        }
+      }catch(_){ }
       // Also watch for SPA nav changes
       try{
         if (!window.__AIDT_NAV_OBSERVER__){
@@ -3068,6 +2916,8 @@
       $('#rng-letter-spacing').value = settings.letterSpacing || 0;
       $('#dd-text-align').value = settings.textAlign || 'default';
       const ddPar=$('#dd-paragraphs'); if (ddPar) { ddPar.value = settings.paragraphs || 'default'; }
+      // Navigation toggles
+      setSwitch($('#sw-auto-claim'), !!settings.autoClickClaim);
 
       renderKeywordChips();
 
@@ -3215,18 +3065,21 @@
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-delete','Delete');
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-bind','Bind to this story');
       setText('section[data-section="misc"] .group:nth-of-type(4) .actions button#pf-unbind','Unbind');
+      // Navigation
+      setText('section[data-section="misc"] .group:nth-of-type(2) .row:nth-of-type(1) span:first-child','Auto-click left navbar button on load');
       // Export/Import buttons
       setText('section[data-section="misc"] .group:nth-of-type(5) .actions button#btn-export','Export');
       setText('section[data-section="misc"] .group:nth-of-type(5) .actions button#btn-import','Import');
       // Reset All
       setText('section[data-section="misc"] > .actions button#reset-all','Reset All');
       // Update switch titles
-      ['#sw-enabled','#sw-do-bold','#sw-say-bold','#sw-im-bold','#sw-it-bold','#sw-sp-bold','#sw-main-bold'].forEach(sel=>{ const el=$(sel); if(el){ setSwitch(el, getSwitch(el)); } });
+      ['#sw-enabled','#sw-do-bold','#sw-say-bold','#sw-im-bold','#sw-it-bold','#sw-sp-bold','#sw-main-bold','#sw-auto-nav'].forEach(sel=>{ const el=$(sel); if(el){ setSwitch(el, getSwitch(el)); } });
     };
     const harvest=()=>{
       // Master toggle controls runtime pause as well
       try{ window.__AIDT_PAUSE__ = !getSwitch($('#sw-enabled')) ? true : false; }catch(_){ }
       settings.enabled = getSwitch($('#sw-enabled'));
+      settings.autoClickClaim = getSwitch($('#sw-auto-claim'));
 
       settings.actions.do.bold   = getSwitch($('#sw-do-bold'));
       settings.actions.do.colour = ($('#dd-do-presets').value || $('#sel-do-colour').value || '#ffffff');
@@ -3260,7 +3113,7 @@
       const rawGrad = ($('#tf-bg-gradient') && $('#tf-bg-gradient').value) || settings.bgGradient || '';
       const rawImg  = ($('#tf-bg-image') && $('#tf-bg-image').value) || settings.bgImageUrl || '';
       const safeUrl = (s)=>{ try{ const u=new URL(s, location.href); return u.protocol==='http:'||u.protocol==='https:' ? u.href : ''; }catch(_){ return ''; } };
-      const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (/^linear-gradient\(|^radial-gradient\(|^conic-gradient\(/i.test(t)) return t; return ''; }catch(_){ return ''; } };
+      const safeGrad=(g)=>{ try{ const t=String(g||'').trim(); if (!t) return ''; if (!/^(linear-gradient|radial-gradient|conic-gradient)\(/i.test(t)) return ''; if (/\b(url|var|calc|attr|env|expression)\s*\(/i.test(t)) return ''; return t; }catch(_){ return ''; } };
       settings.bgGradient     = safeGrad(rawGrad);
       settings.bgImageUrl     = safeUrl(rawImg);
       settings.bgImageSize    = ($('#dd-bg-size') && $('#dd-bg-size').value) || settings.bgImageSize || 'cover';
@@ -3316,7 +3169,7 @@
     const applyLive=()=>{ harvest(); persistSettingsDebounced(); translatePanel(); applyGlobal(); retrofitAllCapsAndKeywords(); reparseNow(); };
 
     // switches → instant
-    ['sw-enabled','sw-do-bold','sw-say-bold','sw-im-bold','sw-sp-bold','sw-main-bold'].forEach(id=>{
+    ['sw-enabled','sw-do-bold','sw-say-bold','sw-im-bold','sw-it-bold','sw-sp-bold','sw-main-bold','sw-auto-claim'].forEach(id=>{
       const sw=$('#'+id); if(!sw) return;
       sw.addEventListener('click', ()=>{ const curr=getSwitch(sw); setSwitch(sw,!curr); applyLive(); });
       sw.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); const curr=getSwitch(sw); setSwitch(sw,!curr); applyLive(); } });
@@ -3334,7 +3187,6 @@
             safeSet(lastParKeyFor(activeName), v);
             rebuildVisibleParagraphs();
             ensureLatestFormatted();
-            bulkNormalizeOverlays();
 
             const jumpBottom=()=>{
               try{
@@ -3689,11 +3541,8 @@
       // Ensure font/spacing + base text styles are applied to newly added roots
       try{ applyFontsAndEffects(); applyBaseText(); retrofitAllCapsAndKeywords(); applyInlineSpanStyles(); }catch(_e){}
       AIDT_applySayDo(document);
-      // Ensure the newest overlay row has our span classes after settings changes
-      try{
-        var ol = document.querySelector('#gameplay-output #transition-opacity, #transition-opacity');
-        if (ol){ try{ normalizeOverlay(); }catch(_no){} try{ overlayWrapSpeech(ol); }catch(_ow){} }
-      }catch(_ens){}
+      // Ensure formatting after settings changes
+      try{ ensureLatestFormatted(); }catch(_ens){}
       try{
         var ifr = document.querySelectorAll('iframe');
         for (var i=0;i<ifr.length;i++){
@@ -3762,18 +3611,18 @@
       // On load, avoid early background flash: style text first, then background later
       applyGlobalNoBG();
       // Apply paragraph mode immediately on startup (panel may be hidden)
-      try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); bulkNormalizeOverlays(); }catch(_){ }
+      try{ rebuildVisibleParagraphs(); ensureLatestFormatted(); }catch(_){ }
       // Apply base text immediately on load
       try{ applyBaseText(); applyInlineSpanStyles(); }catch(_e){}
       // Force an initial latest parse-and-style sweep after first paint, add tiny jitter to avoid hydration collisions
-      try{ const jitter = 60 + Math.floor(Math.random()*20)+5; setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); bulkNormalizeOverlays(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} ensureOverlayWrappedOnce(); scheduleBackgroundApply(); }catch(_e2){} }, jitter); }catch(_e1){}
+      try{ const jitter = 60 + Math.floor(Math.random()*20)+5; setTimeout(()=>{ try{ parseLatestOutput(); formatAllTargetElements(); applyFontsAndEffects(); applyBaseText(); applyInlineSpanStyles(); if (window.__AIDT_HAS_SAYDO__){ AIDT_applySayDo(document);} scheduleBackgroundApply(); }catch(_e2){} }, jitter); }catch(_e1){}
       // Also trigger a background apply a bit later in case UI finished mounting after our first attempt
       try{ setTimeout(()=>{ try{ scheduleBackgroundApply(); }catch(_s2){} }, 450); }catch(_s1){}
       observer.observe(document.body, { childList:true, subtree:true, characterData:true });
       // Attach visible-only observer after initial mount
       try{ attachVisibleObserver(); }catch(_){ }
       // Begin watching the overlay to normalize split-word spans continuously
-      try{ setupOverlayObserver(); /* normalizeOverlay intentionally deferred to avoid wiping newest before spans */ }catch(_){ }
+      try{ setupOverlayObserver(); }catch(_){ }
       // Toggle debug: Ctrl+Alt+D
       try{
         window.addEventListener('keydown', function(e){
@@ -3790,6 +3639,75 @@
       }catch(_){ }
       setupFormatObserver();
       setupCrossTabSync();
+      // (Removed) auto-click left navbar option
+
+      // Optional: auto-click Claim Reward button on load (handles React popout with dynamic id like ":r5t:")
+      try{
+        if (settings.autoClickClaim){
+          let claimed=false;
+          let navClicked=false;
+          const hasBadge=(btn)=>{
+            try{
+              if(!btn || !btn.querySelector) return false;
+              const nodes=btn.querySelectorAll('*');
+              for (let i=0;i<nodes.length;i++){
+                const n=nodes[i];
+                const w=n.offsetWidth||0, h=n.offsetHeight||0;
+                if (w>0 && h>0 && w<=14 && h<=14){
+                  const cs=getComputedStyle(n);
+                  const col=(cs && (cs.backgroundColor||cs.color))||'';
+                  const m=col.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+                  if (m){ const r=+m[1], g=+m[2], b=+m[3]; if (r>=180 && g<=90 && b<=90) return true; }
+                }
+              }
+            }catch(_){ }
+            return false;
+          };
+          const clickClaim=()=>{
+            if (claimed) return;
+            try{
+              // Try inside known popout container first (e.g., id=":r5t:")
+              let popup=null;
+              try{ popup = document.querySelector('[id=":r5t:"]') || document.querySelector('[id^=":"][id$=":"]'); }catch(_){ }
+              if (!popup){
+                try{ popup = document.evaluate('//*[@id=":r5t:"]', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue || null; }catch(_x){}
+              }
+              // Prefer role/button+aria-label containing Claim/Daily Rewards in the navbar
+              let target = null;
+              const scope = popup || document;
+              try{ target = scope.querySelector('[role="button"][aria-label*="Claim Reward" i],button[aria-label*="Claim Reward" i],[role="button"][aria-label*="Daily Rewards" i],button[aria-label*="Daily Rewards" i],[role="button"][aria-label*="Rewards" i],button[aria-label*="Rewards" i]'); }catch(_q){ }
+              // Fallback: find any button/role button containing the word "Claim"
+              if (!target){
+                const all= (scope.querySelectorAll ? scope.querySelectorAll('button,[role="button"],a') : document.querySelectorAll('button,[role="button"],a'));
+                for (let i=0;i<all.length;i++){
+                  const t=all[i]; const label=(t.getAttribute('aria-label')||t.textContent||'').toLowerCase();
+                  if (/\b(claim|reward|rewards|daily|gift)\b/.test(label)){ target=t; break; }
+                }
+              }
+              if (target){
+                const label=((target.getAttribute && target.getAttribute('aria-label'))||target.textContent||'').toLowerCase();
+                const isClaimButton=/\bclaim\b/.test(label) && /(reward|scales|daily|chest|loot)/.test(label);
+                const isNavButton=!isClaimButton && /\b(daily|rewards|gift)\b/.test(label);
+                if (isNavButton && navClicked){ return; }
+                if (isNavButton && !hasBadge(target)){
+                  // Only click navbar rewards button when a red badge is present
+                  return;
+                }
+                try{ target.scrollIntoView && target.scrollIntoView({block:'center', inline:'center'}); }catch(_sv){}
+                try{ const opts={bubbles:true,cancelable:true,composed:true}; target.dispatchEvent(new PointerEvent('pointerdown', opts)); target.dispatchEvent(new MouseEvent('mousedown', opts)); target.dispatchEvent(new MouseEvent('mouseup', opts)); target.dispatchEvent(new MouseEvent('click', opts)); }catch(_d){ try{ target.click && target.click(); }catch(__){} }
+                if (isClaimButton){ claimed=true; } else if (isNavButton){ navClicked=true; }
+              }
+            }catch(_){ }
+          };
+          [300,800,1500,2500,4000,6000].forEach(ms=> setTimeout(clickClaim, ms));
+          // Also observe DOM to catch the popout as soon as it mounts
+          try{
+            const mo = createAidtObserver(()=>{ clickClaim(); });
+            mo.observe(document.body, {childList:true, subtree:true});
+            setTimeout(()=>{ try{ mo.disconnect(); }catch(__){} }, 8000);
+          }catch(_o){}
+        }
+      }catch(_){ }
       try{
         const clear = ()=>{ try{ if (window.__AIDT_PRUNE_TIMER__){ clearInterval(window.__AIDT_PRUNE_TIMER__); window.__AIDT_PRUNE_TIMER__=null; } }catch(_){ } };
         window.addEventListener('pagehide', clear, { once:true });
@@ -3822,7 +3740,7 @@
         const shouldPause=(target)=>{
           try{
             if (!target || !target.closest) return false;
-            return !!(target.closest('#gameplay-output') || target.closest('#transition-opacity') || target.closest('#do-not-copy') || target.closest('[data-testid="adventure-text"]'));
+            return !!(target.closest('#gameplay-output') || target.closest('#transition-opacity'));
           }catch(_){ return false; }
         };
         document.addEventListener('pointerdown', function(ev){ try{ if (shouldPause(ev.target)) doPause(900); }catch(_){ } }, {capture:true, passive:true});
@@ -3900,6 +3818,7 @@
     return out;
   }
 
+window.AIDT_applySayDo = AIDT_applySayDo;
 function AIDT_applySayDo(root){
     try{
       root = root || document;
@@ -3909,13 +3828,13 @@ function AIDT_applySayDo(root){
         var enabled = (st && typeof st.enabled !== 'undefined') ? !!st.enabled : true;
         if (!enabled){
           try{
-            var clearTargets = root.querySelectorAll('.w_comment, .w-comment, .w_run, .w-run, #transition-opacity');
+            var clearTargets = root.querySelectorAll('#transition-opacity');
             for (var ci=0; ci<clearTargets.length; ci++){
               var n = clearTargets[ci];
               try{
                 n.style.removeProperty('color');
                 n.style.removeProperty('font-weight');
-                var spans = n.querySelectorAll('span.font_gameplay, p.font_gameplay, div.font_gameplay');
+                var spans = n.querySelectorAll('.font_gameplaySans');
                 for (var si=0; si<spans.length; si++){ spans[si].style.removeProperty('color'); spans[si].style.removeProperty('font-weight'); }
                 var svgs = n.querySelectorAll('svg, svg *');
                 for (var svi=0; svi<svgs.length; svi++){ svgs[svi].style.removeProperty('stroke'); svgs[svi].style.removeProperty('fill'); }
@@ -3954,34 +3873,21 @@ for (var j=0;j<links.length;j++){
           p = p.parentElement;
         }
       }
-      var sayBlocks = root.querySelectorAll('.w_comment, .w-comment');
-      var sayXPath = AIDT_xpathAll(root, ".//*[contains(concat(' ', normalize-space(@class),' '), ' w_comment ') or contains(concat(' ', normalize-space(@class),' '), ' w-comment ')]");
-      sayBlocks = AIDT_mergeUnique(Array.from(sayBlocks), sayXPath);
-for (var a=0;a<sayBlocks.length;a++){
-        styleNode(sayBlocks[a], eff.SAY_COL, eff.SAY_W);
-        upchain(sayBlocks[a], 5, eff.SAY_COL, eff.SAY_W);
-      }
-      var doBlocks = root.querySelectorAll('.w_run, .w-run');
-      var doXPath = AIDT_xpathAll(root, ".//*[contains(concat(' ', normalize-space(@class),' '), ' w_run ') or contains(concat(' ', normalize-space(@class),' '), ' w-run ')]");
-      doBlocks = AIDT_mergeUnique(Array.from(doBlocks), doXPath);
-for (var b=0;b<doBlocks.length;b++){
-        styleNode(doBlocks[b], eff.DO_COL, eff.DO_W);
-        upchain(doBlocks[b], 5, eff.DO_COL, eff.DO_W);
-      }
-      // Extension-style nodes (if present)
+      // Style action rows by detecting type from #action-icon text content
       var rows = root.querySelectorAll('#transition-opacity');
       for (var r=0;r<rows.length;r++){
         try{
           var iconNode = rows[r].querySelector('#action-icon');
-          var textNode = rows[r].querySelector('span.font_gameplay, p.font_gameplay, div.font_gameplay');
-          if (!iconNode || !textNode) continue;
+          if (!iconNode) continue;
+          var textNode = rows[r].querySelector('.font_gameplaySans');
           var t = (iconNode.textContent || '').trim();
           var isSay = (t === 'w_comment');
           var isDo  = (t === 'w_run');
-          var col = isSay ? eff.SAY_COL : isDo ? eff.DO_COL : null;
-          var wt  = isSay ? eff.SAY_W   : isDo ? eff.DO_W   : '';
-          if (col){ iconNode.style.setProperty('color', col, 'important'); textNode.style.setProperty('color', col, 'important'); }
-          textNode.style.setProperty('font-weight', (wt ? wt : '400'), 'important');
+          if (!isSay && !isDo) continue;
+          var col = isSay ? eff.SAY_COL : eff.DO_COL;
+          var wt  = isSay ? eff.SAY_W   : eff.DO_W;
+          styleNode(rows[r], col, wt);
+          if (textNode){ styleNode(textNode, col, wt); }
         }catch(e){}
       }
     }catch(e){}
@@ -4054,7 +3960,7 @@ for (var b=0;b<doBlocks.length;b++){
     function _aidt_countOutputs(){
       try{
         return document.querySelectorAll(
-          '#transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], .w_comment, .w-comment, .w_run, .w-run'
+          '#transition-opacity, span.font_heading, .font_gameplaySans'
         ).length;
       }catch(_){ return 0; }
     }
@@ -4062,7 +3968,7 @@ for (var b=0;b<doBlocks.length;b++){
       try{
         var n = 0;
         var nodes = document.querySelectorAll(
-          '#transition-opacity, [data-testid="adventure-text"], [data-testid="message-text"], [data-testid="playback-content"], .w_comment, .w-comment, .w_run, .w-run'
+          '#transition-opacity, span.font_heading, .font_gameplaySans'
         );
         for (var i=0;i<nodes.length;i++){ n += (nodes[i].textContent || '').length; }
         return n;

@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.0 – 2026-03-26
+- Fixed
+  - Updated all DOM selectors for the new AI Dungeon site structure (play, beta, alpha all use identical layout now).
+  - Say/Do action coloring now detects action type from `#action-icon` text content (`w_comment`/`w_run`) instead of removed CSS classes.
+  - Updated `font_gameplay` class references to `font_gameplaySans` throughout.
+  - Text element picking simplified for the new single-layer rendering (no more copy/overlay duality).
+  - `isPageReady`, `isEditingActive`, `shouldPause`, output counters updated to use current selectors.
+  - Say/Do color no longer bleeds into narration text (removed `upchain` from action row styling).
+  - Italics bold toggle now responds to clicks (was missing from click handler list).
+  - Text duplication bug: `parseWithinRoot` now skips elements that already contain `.aidt` formatted spans.
+  - React crash (`Node.removeChild`) prevented by patching `removeChild`/`insertBefore` on Next.js sites.
+  - `AIDT_replaceHTML` simplified to direct `innerHTML` to avoid React DOM tree conflicts.
+  - Exposed `createAidtObserver` and `AIDT_applySayDo` to `window` so separate IIFEs (Say/Do patch, attribute observer) can access them.
+- Changed
+  - Keyword regex and caps-exclude regex are now memoized (only rebuilt when keywords change).
+  - Gradient validation strengthened: blocks `calc()`, `attr()`, `env()`, `expression()` in addition to `url()`/`var()`.
+  - Background image-in-front mode now uses sanitized `urlSafe` instead of raw `imgUrl`.
+  - Keyword color values validated with regex before insertion into inline styles.
+  - Node.prototype patches scoped to Next.js sites only (checks `__NEXT_DATA__` / `#__next`).
+  - Duplicate `querySelectorAll` call in `attachLatestObserver` cached to single query.
+- Removed
+  - Dead dual-layer overlay/copy sync code: `syncOverlayFromCopy`, `rebuildOverlayFromOwnText`, `overlayWrapSpeech`, `ensureOverlayWrappedOnce`, `normalizeOverlay`, `bulkNormalizeOverlays` and all call sites.
+  - All `#do-not-copy` references (element no longer exists on the site).
+  - All `#game-backdrop-saturate` per-word span handling (element no longer exists).
+  - All `data-testid` selector fallbacks (attributes no longer exist on the site).
+  - `.w_comment`/`.w-comment` CSS class selectors (classes no longer exist; action type now determined by `#action-icon` text).
+  - Dead CSS rule for `.w_comment .aidt-speech` styling.
+  - XPath fallback queries for `w_comment`/`w_run` classes.
+  - `OVERLAY_WRAP_SAFE` and `OVERLAY_MUTATION_SAFE` constants.
+
+## 1.4.9.1 – 2025-09-11
+- Added
+  - Misc → Navigation: toggle to auto-click “Claim Reward” on load.
+- Changed
+  - Claim Reward clicker: robust navbar targeting (Daily Rewards/gift), pointer event simulation, retries, and DOM observer until panel mounts.
+- Fixed
+  - (none)
+- Removed
+  - (none)
+
 ## 1.4.9 – 2025-09-11
 - Added
   - (none)
